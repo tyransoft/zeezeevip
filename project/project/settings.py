@@ -28,8 +28,11 @@ SECRET_KEY = 'django-insecure-v+m14j!w&-(%t5_qji23aftx-wa&@)0wz%y8999&5n(io_i487
 DEBUG = True
 
 
-ALLOWED_HOSTS = []
 
+ALLOWED_HOSTS = ['zeezeevip.tip2.libyanspider.cloud']
+CSRF_TRUSTED_ORIGINS = [
+    'https://zeezeevip.tip2.libyanspider.cloud',
+]
 SITE_URL = "https://zeezeevip.tip2.libyanspider.cloud/"
 
 
@@ -84,10 +87,15 @@ WSGI_APPLICATION = 'project.wsgi.application'
 
 DATABASES = {
     'default': {
-        'ENGINE': 'django.db.backends.sqlite3',
-        'NAME': BASE_DIR / 'db.sqlite3',
+        'ENGINE': 'django.db.backends.postgresql',
+        'NAME': 'zeezeevip',
+        'USER': 'webadmin',
+        'PASSWORD': 'SLPskg91411',
+        'HOST': '10.7.6.92',
+        'PORT': '5432',
     }
 }
+
 
 
 # Password validation
@@ -140,8 +148,8 @@ DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 AUTH_USER_MODEL = 'core.CustomUser'
 
 
-CSRF_COOKIE_SECURE = False
-SESSION_COOKIE_SECURE = False
+CSRF_COOKIE_SECURE = True
+SESSION_COOKIE_SECURE = True
 
 
 
