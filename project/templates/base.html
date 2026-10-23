@@ -1,0 +1,1254 @@
+{% load static %}
+{% load humanize %}
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <title>{% block title %}ZEE ZEE VIP{% endblock %}</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css">
+<link rel="manifest" href="/static/pwa/manifest.json">
+<meta name="theme-color" content="#3f4042">    
+ <script>
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', async () => {
+    try {
+      await navigator.serviceWorker.register('/sew.js');
+    } catch (error) {
+      console.error('Service Worker registration failed:', error);
+    }
+  });
+}
+</script>
+  <style>
+:root {
+    --primary: #D4AF37;
+    --primary-dark: #E6C76A;
+    --primary-light: #fef3ed;
+    --sidebar-width: 280px;
+    --header-height: 64px;
+    --radius: 12px;
+    --shadow-sm: 0 1px 3px rgba(0,0,0,0.06);
+    --shadow-md: 0 4px 16px rgba(0,0,0,0.10);
+    --transition: 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+    --font: system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+    --nav-height: 56px;
+    --bottom-nav-height: 64px;
+}
+
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+html { scroll-behavior: smooth; }
+
+body {
+    font-family: var(--font);
+    background: #f6f8fc;
+    color: #1a2236;
+    line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+    min-height: 100vh;
+    overflow-x: hidden;
+    padding-bottom: var(--bottom-nav-height);
+}
+
+.erp-wrapper {
+    display: flex;
+    flex-direction: column;
+    min-height: 100vh;
+}
+
+.top-nav {
+    background: linear-gradient(180deg, #1a2236 0%, #0f172a 100%);
+    color: #fff;
+    padding: 0 24px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    height: var(--nav-height);
+    flex-shrink: 0;
+    position: sticky;
+    top: 0;
+    z-index: 100;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.2);
+}
+
+.top-nav-brand {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-shrink: 0;
+}
+
+.top-nav-brand img {
+    height: 36px;
+    width: auto;
+    object-fit: contain;
+}
+
+.top-nav-brand span {
+    font-size: 16px;
+    font-weight: 700;
+    color: #fff;
+    letter-spacing: -0.3px;
+}
+
+.top-nav-links {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    flex: 1;
+    justify-content: center;
+}
+
+.top-nav-link {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 2px;
+    padding: 6px 18px;
+    color: rgba(255,255,255,0.6);
+    text-decoration: none;
+    font-size: 11px;
+    font-weight: 500;
+    border-radius: 8px;
+    transition: all 0.2s;
+    cursor: pointer;
+    min-height: 46px;
+    min-width: 64px;
+    border: none;
+    background: transparent;
+    position: relative;
+}
+
+.top-nav-link .nav-icon {
+    font-size: 20px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.2s;
+}
+
+.top-nav-link .nav-label {
+    font-size: 10px;
+    opacity: 0.8;
+}
+
+.top-nav-link .nav-badge {
+    position: absolute;
+    top: 2px;
+    right: 6px;
+    background: #ef4444;
+    color: #fff;
+    font-size: 10px;
+    font-weight: 700;
+    min-width: 18px;
+    height: 18px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0 4px;
+    box-shadow: 0 2px 6px rgba(239, 68, 68, 0.4);
+    animation: pulse-badge 2s infinite;
+}
+
+@keyframes pulse-badge {
+    0% { transform: scale(1); }
+    50% { transform: scale(1.1); }
+    100% { transform: scale(1); }
+}
+
+.top-nav-link .nav-badge.zero {
+    display: none;
+}
+
+.top-nav-link:hover {
+    color: #fff;
+    background: rgba(255,255,255,0.08);
+}
+
+.top-nav-link.active {
+    color: var(--primary);
+    background: rgba(212, 175, 55, 0.15);
+}
+
+.top-nav-link.active .nav-icon {
+    transform: scale(1.05);
+}
+
+.top-nav-link.active::after {
+    content: '';
+    position: absolute;
+    bottom: 0;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 20px;
+    height: 2px;
+    background: var(--primary);
+    border-radius: 2px;
+}
+
+.top-nav-link.active .nav-badge {
+    animation: none;
+    background: var(--primary);
+    box-shadow: 0 2px 6px rgba(212, 175, 55, 0.4);
+}
+
+.top-nav-user {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    flex-shrink: 0;
+}
+
+.top-nav-user .user-avatar {
+    width: 34px;
+    height: 34px;
+    background: var(--primary);
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 14px;
+    font-weight: 700;
+    color: #fff;
+}
+
+.top-nav-user .user-name {
+    font-size: 13px;
+    font-weight: 500;
+    color: rgba(255,255,255,0.9);
+    white-space: nowrap;
+}
+
+.top-nav-user .logout-btn {
+    color: rgba(255,255,255,0.5);
+    text-decoration: none;
+    font-size: 14px;
+    padding: 6px 10px;
+    border-radius: 6px;
+    transition: all 0.2s;
+}
+
+.top-nav-user .logout-btn:hover {
+    color: #fff;
+    background: rgba(255,255,255,0.08);
+}
+
+.section-page {
+    display: none;
+    padding: 16px 20px;
+    background: #fff;
+    border-bottom: 1px solid #eaecf0;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+
+.section-page.active {
+    display: flex;
+}
+
+.section-page .section-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 18px;
+    border: 1.5px solid #eaecf0;
+    border-radius: 8px;
+    background: #fff;
+    color: #374151;
+    font-size: 13px;
+    font-weight: 500;
+    text-decoration: none;
+    transition: all 0.2s;
+    cursor: pointer;
+    font-family: var(--font);
+}
+
+.section-page .section-btn .nav-icon {
+    font-size: 18px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.section-page .section-btn:hover {
+    border-color: var(--primary);
+    background: var(--primary-light);
+    color: var(--primary);
+    transform: translateY(-1px);
+    box-shadow: var(--shadow-sm);
+}
+
+.section-page .section-btn.active {
+    border-color: var(--primary);
+    background: var(--primary);
+    color: #fff;
+}
+
+.main-content {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+}
+
+.topbar {
+    background: #fff;
+    padding: 0 24px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 10px;
+    box-shadow: var(--shadow-sm);
+    position: sticky;
+    top: var(--nav-height);
+    z-index: 99;
+    height: var(--header-height);
+    flex-shrink: 0;
+}
+
+.page-title {
+    font-size: 20px;
+    font-weight: 700;
+    color: #1a2236;
+    margin: 0;
+    letter-spacing: -0.3px;
+}
+
+.topbar-right {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    flex-wrap: wrap;
+}
+
+.topbar-welcome {
+    font-size: 13px;
+    color: #6b7280;
+}
+
+.topbar-badge {
+    background: var(--primary-light);
+    color: var(--primary);
+    padding: 4px 14px;
+    border-radius: 20px;
+    font-size: 12px;
+    font-weight: 600;
+}
+
+.mobile-header {
+    display: none;
+    background: #fff;
+    padding: 0 16px;
+    align-items: center;
+    justify-content: space-between;
+    border-bottom: 1px solid #eaecf0;
+    position: sticky;
+    top: var(--nav-height);
+    z-index: 98;
+    height: 56px;
+    flex-shrink: 0;
+}
+
+.page-title-mobile {
+    font-size: 16px;
+    font-weight: 700;
+    color: #1a2236;
+}
+
+.user-avatar-small {
+    width: 36px;
+    height: 36px;
+    border-radius: var(--radius);
+    background: var(--primary);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: #fff;
+    font-weight: 700;
+    font-size: 14px;
+    flex-shrink: 0;
+}
+
+.bottom-nav {
+    display: none;
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    background: linear-gradient(180deg, #1a2236 0%, #0f172a 100%);
+    border-top: 1px solid rgba(255,255,255,0.06);
+    z-index: 1000;
+    height: var(--bottom-nav-height);
+    padding: 4px 0 env(safe-area-inset-bottom);
+    justify-content: space-around;
+    align-items: center;
+    box-shadow: 0 -2px 10px rgba(0,0,0,0.15);
+}
+
+.bottom-nav-link {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 1px;
+    color: rgba(255,255,255,0.5);
+    text-decoration: none;
+    font-size: 9px;
+    font-weight: 500;
+    padding: 4px 8px;
+    border-radius: 8px;
+    transition: all 0.2s;
+    cursor: pointer;
+    border: none;
+    background: transparent;
+    min-width: 48px;
+    position: relative;
+}
+
+.bottom-nav-link .nav-icon {
+    font-size: 22px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.2s;
+}
+
+.bottom-nav-link .nav-label {
+    font-size: 9px;
+    opacity: 0.7;
+}
+
+.bottom-nav-link .nav-badge {
+    position: absolute;
+    top: 0;
+    right: 4px;
+    background: #ef4444;
+    color: #fff;
+    font-size: 9px;
+    font-weight: 700;
+    min-width: 16px;
+    height: 16px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0 3px;
+    box-shadow: 0 2px 6px rgba(239, 68, 68, 0.4);
+}
+
+.bottom-nav-link .nav-badge.zero {
+    display: none;
+}
+
+.bottom-nav-link:hover {
+    color: #fff;
+}
+
+.bottom-nav-link.active {
+    color: var(--primary);
+}
+
+.bottom-nav-link.active .nav-icon {
+    transform: scale(1.05);
+}
+
+.bottom-nav-link.active::after {
+    content: '';
+    position: absolute;
+    top: -1px;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 24px;
+    height: 2px;
+    background: var(--primary);
+    border-radius: 2px;
+}
+
+.page-content {
+    padding: 24px;
+    max-width: 1400px;
+    margin: 0 auto;
+    width: 100%;
+    flex: 1;
+}
+
+.stats-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 16px;
+    margin-bottom: 24px;
+}
+
+.stat-card {
+    background: #fff;
+    border-radius: var(--radius);
+    border: 1px solid #eaecf0;
+    padding: 18px 20px;
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    box-shadow: var(--shadow-sm);
+    transition: all 0.2s;
+}
+
+.stat-card:hover {
+    box-shadow: var(--shadow-md);
+    transform: translateY(-2px);
+}
+
+.stat-icon {
+    width: 50px;
+    height: 50px;
+    border-radius: var(--radius);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 22px;
+    flex-shrink: 0;
+}
+
+.stat-icon.primary { background: var(--primary-light); color: var(--primary); }
+.stat-icon.success { background: #dcfce7; color: #16a34a; }
+.stat-icon.warning { background: #fef3c7; color: #d97706; }
+.stat-icon.danger  { background: #fee2e2; color: #dc2626; }
+.stat-icon.info    { background: #dbeafe; color: #2563eb; }
+
+.stat-info { flex: 1; min-width: 0; }
+
+.stat-value {
+    font-size: 26px;
+    font-weight: 800;
+    color: #1a2236;
+    line-height: 1.2;
+}
+
+.stat-label {
+    font-size: 12px;
+    color: #6b7280;
+    font-weight: 500;
+    margin-top: 2px;
+}
+
+.grid-2 {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 20px;
+    margin-bottom: 20px;
+}
+
+.card {
+    background: #fff;
+    border-radius: var(--radius);
+    border: 1px solid #eaecf0;
+    box-shadow: var(--shadow-sm);
+    margin-bottom: 20px;
+    transition: box-shadow 0.2s;
+    overflow: hidden;
+}
+
+.card:hover { box-shadow: var(--shadow-md); }
+.card:last-child { margin-bottom: 0; }
+
+.card-header {
+    padding: 16px 20px;
+    border-bottom: 1px solid #eaecf0;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 10px;
+    background: #fff;
+}
+
+.card-title {
+    font-size: 15px;
+    font-weight: 700;
+    color: #1a2236;
+    margin: 0;
+}
+
+.card-body { padding: 20px; }
+
+.table-responsive {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+}
+
+.erp-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 14px;
+    min-width: 580px;
+}
+
+.erp-table th {
+    background: #f8fafc;
+    font-weight: 600;
+    color: #374151;
+    padding: 12px 16px;
+    text-align: center;
+    border-bottom: 2px solid #eaecf0;
+    white-space: nowrap;
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: 0.3px;
+}
+
+.erp-table td {
+    padding: 12px 16px;
+    text-align: center;
+    border-bottom: 1px solid #f1f3f5;
+    vertical-align: middle;
+}
+
+.erp-table tbody tr:last-child td { border-bottom: none; }
+.erp-table tbody tr:hover { background: #fafbfc; }
+
+.badge {
+    display: inline-block;
+    padding: 4px 12px;
+    border-radius: 20px;
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.2px;
+}
+
+.badge-primary { background: var(--primary-light); color: var(--primary); }
+.badge-success { background: #dcfce7; color: #16a34a; }
+.badge-danger  { background: #fee2e2; color: #dc2626; }
+.badge-warning { background: #fef3c7; color: #d97706; }
+.badge-info    { background: #dbeafe; color: #2563eb; }
+
+.btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    padding: 10px 20px;
+    border: none;
+    border-radius: 8px;
+    font-size: 14px;
+    font-weight: 600;
+    font-family: var(--font);
+    cursor: pointer;
+    transition: all 0.2s;
+    text-decoration: none;
+    min-height: 42px;
+    touch-action: manipulation;
+    user-select: none;
+    -webkit-tap-highlight-color: transparent;
+    white-space: nowrap;
+}
+
+.btn-primary { background: var(--primary); color: #fff; }
+.btn-primary:hover { background: var(--primary-dark); transform: translateY(-1px); box-shadow: 0 4px 12px rgba(232,121,58,0.3); }
+.btn-primary:active { transform: scale(0.97); }
+
+.btn-success { background: #16a34a; color: #fff; }
+.btn-success:hover { background: #15803d; }
+
+.btn-danger { background: #dc2626; color: #fff; }
+.btn-danger:hover { background: #b91c1c; }
+
+.btn-outline { background: transparent; border: 1.5px solid #eaecf0; color: #374151; }
+.btn-outline:hover { background: #f8f9fb; border-color: #d1d5db; }
+
+.btn-sm { padding: 6px 14px; font-size: 12px; min-height: 34px; }
+
+.btn:disabled { opacity: 0.6; cursor: not-allowed; pointer-events: none; transform: none !important; }
+
+.form-group { margin-bottom: 16px; }
+
+.form-label {
+    display: block;
+    font-size: 13px;
+    font-weight: 600;
+    color: #374151;
+    margin-bottom: 6px;
+}
+
+.form-control,
+.form-select {
+    width: 100%;
+    padding: 10px 14px;
+    border: 1.5px solid #eaecf0;
+    border-radius: 8px;
+    font-size: 14px;
+    font-family: var(--font);
+    transition: border-color 0.2s, box-shadow 0.2s;
+    background: #fff;
+    color: #1a2236;
+    -webkit-appearance: none;
+    appearance: none;
+    outline: none;
+}
+
+.form-control:focus,
+.form-select:focus {
+    border-color: var(--primary);
+    box-shadow: 0 0 0 4px rgba(232,121,58,0.12);
+}
+
+.form-control::placeholder { color: #9ca3af; }
+
+textarea.form-control { resize: vertical; min-height: 90px; }
+
+.form-row {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
+}
+
+.alert {
+    padding: 14px 18px;
+    border-radius: var(--radius);
+    margin-bottom: 16px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    border: 1px solid transparent;
+    font-weight: 500;
+    font-size: 14px;
+}
+
+.alert-success { background: #dcfce7; border-color: #bbf7d0; color: #166534; }
+.alert-danger  { background: #fee2e2; border-color: #fecaca; color: #991b1b; }
+.alert-warning { background: #fef3c7; border-color: #fde68a; color: #92400e; }
+.alert-info    { background: #dbeafe; border-color: #bfdbfe; color: #1e40af; }
+
+.text-muted { color: #6b7280; }
+.text-center { text-align: center; }
+.fw-bold { font-weight: 700; }
+.d-flex { display: flex; }
+.gap-2 { gap: 8px; }
+.gap-3 { gap: 12px; }
+.flex-wrap { flex-wrap: wrap; }
+.align-center { align-items: center; }
+.justify-between { justify-content: space-between; }
+.mt-2 { margin-top: 8px; }
+.mt-3 { margin-top: 12px; }
+.mt-4 { margin-top: 16px; }
+.mb-0 { margin-bottom: 0; }
+.mb-3 { margin-bottom: 12px; }
+.mb-4 { margin-bottom: 16px; }
+.w-100 { width: 100%; }
+
+@media (max-width: 1024px) {
+    .stats-grid { grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); }
+    .grid-2 { grid-template-columns: 1fr; }
+    .top-nav-link .nav-label { display: none; }
+    .top-nav-link { min-width: 50px; padding: 6px 12px; }
+    .top-nav-link .nav-icon { font-size: 18px; }
+    .top-nav-link .nav-badge { top: 0; right: 2px; font-size: 8px; min-width: 14px; height: 14px; }
+}
+
+@media (max-width: 768px) {
+    body { padding-bottom: var(--bottom-nav-height); }
+
+    .top-nav {
+        padding: 0 12px;
+        height: 52px;
+    }
+
+    .top-nav-brand span { display: none; }
+    .top-nav-brand img { height: 30px; }
+    .top-nav-user .user-name { display: none; }
+    .top-nav-user .logout-btn span { display: none; }
+    .top-nav-links { gap: 2px; }
+    .top-nav-link { min-width: 44px; padding: 4px 8px; min-height: 40px; }
+    .top-nav-link .nav-icon { font-size: 18px; }
+    .top-nav-link .nav-badge { top: 0; right: 2px; font-size: 8px; min-width: 14px; height: 14px; }
+
+    .topbar { display: none; }
+    .mobile-header { display: flex; }
+
+    .page-content { padding: 12px; }
+
+    .stats-grid {
+        grid-template-columns: repeat(2, 1fr);
+        gap: 10px;
+        margin-bottom: 16px;
+    }
+
+    .stat-card { padding: 14px; }
+    .stat-value { font-size: 20px; }
+    .stat-icon { width: 42px; height: 42px; font-size: 18px; }
+
+    .card { border-radius: 10px; margin-bottom: 12px; }
+    .card-header { padding: 12px 14px; }
+    .card-body { padding: 14px; }
+
+    .erp-table { font-size: 13px; }
+    .erp-table th, .erp-table td { padding: 10px 10px; }
+
+    .btn { min-height: 44px; font-size: 14px; }
+    .form-control, .form-select { font-size: 16px; padding: 12px 14px; }
+
+    .form-row { grid-template-columns: 1fr; }
+    .grid-2 { grid-template-columns: 1fr; }
+    .page-title { font-size: 18px; }
+
+    .section-page {
+        padding: 10px 12px;
+        gap: 6px;
+        flex-wrap: nowrap;
+        overflow-x: auto;
+        -webkit-overflow-scrolling: touch;
+        scroll-snap-type: x mandatory;
+    }
+
+    .section-page .section-btn {
+        padding: 8px 14px;
+        font-size: 12px;
+        white-space: nowrap;
+        scroll-snap-align: start;
+        flex-shrink: 0;
+    }
+
+    .section-page .section-btn .nav-icon {
+        font-size: 16px;
+    }
+
+    .bottom-nav {
+        display: flex;
+    }
+
+    .section-page {
+        display: none;
+    }
+    .section-page.active {
+        display: flex;
+    }
+}
+
+@media (max-width: 480px) {
+    .stats-grid { gap: 8px; }
+    .stat-card { padding: 12px; }
+    .stat-value { font-size: 18px; }
+    .stat-label { font-size: 10px; }
+    .stat-icon { width: 38px; height: 38px; font-size: 16px; }
+    .page-content { padding: 10px; }
+    .card { margin-bottom: 10px; }
+    .erp-table { font-size: 12px; min-width: 420px; }
+    .erp-table th, .erp-table td { padding: 8px 8px; }
+    .btn-sm { font-size: 11px; padding: 5px 10px; }
+    .mobile-header .page-title-mobile { font-size: 14px; }
+    .top-nav-link .nav-icon { font-size: 16px; }
+    .top-nav-link { min-width: 38px; padding: 4px 6px; }
+    .bottom-nav-link .nav-icon { font-size: 20px; }
+    .bottom-nav-link .nav-badge { top: 0; right: 2px; font-size: 7px; min-width: 12px; height: 12px; }
+}
+
+@media (min-width: 769px) {
+    .bottom-nav { display: none !important; }
+    .section-page {
+        display: none !important;
+    }
+    .section-page.active {
+        display: flex !important;
+    }
+}
+
+@media print {
+    .top-nav, .bottom-nav, .topbar, .mobile-header { display: none !important; }
+    .page-content { padding: 0 !important; }
+    .card { box-shadow: none !important; border: 1px solid #ddd !important; break-inside: avoid; }
+    body { padding-bottom: 0 !important; }
+}
+
+[dir="rtl"] .top-nav-link.active::after {
+    left: 50%;
+    transform: translateX(50%);
+}
+
+[dir="rtl"] .bottom-nav-link.active::after {
+    left: 50%;
+    transform: translateX(50%);
+}
+.form-control,
+.form-select,
+input[type="number"],
+input[type="date"] {
+    direction: ltr;
+    text-align: right;
+}
+</style>
+    {% block extra_css %}{% endblock %}
+</head>
+<body>
+
+<div class="erp-wrapper">
+
+    <nav class="top-nav" role="navigation" aria-label="القائمة العلوية">
+        <div class="top-nav-brand">
+            <img src="{% static 'img/image.png' %}" alt="Zee Zee Botiq">
+            <span>Zee Zee VIP</span>
+        </div>
+
+        <div class="top-nav-links">
+            <button class="top-nav-link active" data-section="home" aria-expanded="true">
+                <i class="fa-solid fa-house nav-icon"></i>
+                <span class="nav-label">الرئيسية</span>
+            </button>
+            
+            <button class="top-nav-link" data-section="reservations" aria-expanded="false">
+                <i class="fa-solid fa-calendar-check nav-icon"></i>
+                <span class="nav-label">الحجوزات</span>
+                <span class="nav-badge {% if today_reservations_count == 0 %}zero{% endif %}">{{ today_reservations_count }}</span>
+            </button>
+            
+            <button class="top-nav-link" data-section="dresses" aria-expanded="false">
+                <i class="fa-solid fa-shirt nav-icon"></i>
+                <span class="nav-label">الفساتين</span>
+            </button>
+            
+            <button class="top-nav-link" data-section="sales" aria-expanded="false">
+                <i class="fa-solid fa-file-invoice-dollar nav-icon"></i>
+                <span class="nav-label">المبيعات</span>
+            </button>
+            
+            <button class="top-nav-link" data-section="customers" aria-expanded="false">
+                <i class="fa-solid fa-users nav-icon"></i>
+                <span class="nav-label">العملاء</span>
+            </button>
+            
+            <button class="top-nav-link" data-section="management" aria-expanded="false">
+                <i class="fa-solid fa-gears nav-icon"></i>
+                <span class="nav-label">الإدارة</span>
+            </button>
+        </div>
+
+        <div class="top-nav-user">
+            {% if user.is_authenticated %}
+            <span class="user-name">{{ user.first_name|default:user.username }}</span>
+            <div class="user-avatar">{{ user.first_name|first|default:user.username|first }}</div>
+            <a href="{% url 'logout' %}" class="logout-btn" title="تسجيل الخروج">
+                <i class="fa-solid fa-right-from-bracket"></i>
+                <span>خروج</span>
+            </a>
+            {% endif %}
+        </div>
+    </nav>
+
+    
+    <div class="section-page active" id="section-home">
+        {% if user.can_see_all_data or user.is_accountant %}
+            <a href="{% url 'admin_daily_report_print' %}" class="section-btn" >
+        <i class="fas fa-file-pdf"></i> تقرير  
+    </a>
+    <a href="{% url 'employee_performance_print' %}" class="section-btn" >
+    <i class="fas fa-chart-bar"></i> تقرير  الموظفين
+</a>
+        <a href="{% url 'statistics' %}" class="section-btn">
+            <i class="fa-solid fa-chart-pie nav-icon"></i> لوحة التحكم
+        </a>
+         {% else %}
+         <a href="{% url 'employee_performance_print' %}?employee_id={{ request.user.id }}" class="section-btn">
+    <i class="fas fa-print"></i> تقرير اليوم
+</a>
+        {% endif %}
+    </div>
+
+    <div class="section-page" id="section-reservations">
+        <a href="{% url 'reservations_list' %}" class="section-btn">
+            <i class="fa-solid fa-calendar-check nav-icon"></i> جميع الحجوزات
+        </a>
+    <a href="{% url 'reservations_list' %}?start_date={{ today }}" class="section-btn">
+        <i class="fa-solid fa-calendar-day nav-icon"></i> حجوزات اليوم
+        <span class="badge badge-danger" style="font-size:12px;">{{ today_reservations_count }}</span>
+    </a>
+        <a href="{% url 'create_invoice' %}" class="section-btn">
+            <i class="fa-solid fa-plus nav-icon"></i> حجز جديد
+        </a>
+    </div>
+
+    <div class="section-page" id="section-dresses">
+        {% if user.can_see_all_data %}
+        <a href="{% url 'categories' %}" class="section-btn">
+            <i class="fa-solid fa-layer-group nav-icon"></i> الفئات
+        </a>
+        <a href="{% url 'products_list' %}" class="section-btn">
+            <i class="fa-solid fa-shirt nav-icon"></i> الفساتين
+        </a>
+        <a href="{% url 'inventory_report' %}" class="section-btn">
+            <i class="fa-solid fa-boxes-stacked nav-icon"></i> جرد الفساتين
+        </a>
+        <a href="{% url 'repair_list' %}" class="section-btn">
+            <i class="fa-solid fa-screwdriver-wrench nav-icon"></i> الصيانة والتنظيف
+        </a>
+        <a href="{% url 'provider_list' %}" class="section-btn">
+            <i class="fa-solid fa-user-tie nav-icon"></i> مزودون الخدمة
+        </a>
+        <a href="{% url 'product_old_revenue_list' %}" class="section-btn">
+            <i class="fa-solid fa-clock-rotate-left nav-icon"></i> الايرادات القديمة 
+        </a>
+        <a href="{% url 'print_barcodes' %}" class="section-btn">
+            <i class="fa-solid fa-barcode nav-icon"></i> طباعة الباركود
+        </a>
+        {% endif %}
+    </div>
+
+    <div class="section-page" id="section-sales">
+        <a href="{% url 'create_invoice' %}" class="section-btn">
+            <i class="fa-solid fa-plus nav-icon"></i> فاتورة جديدة
+        </a>
+        <a href="{% url 'invoice_list' %}" class="section-btn">
+            <i class="fa-solid fa-file-lines nav-icon"></i> فواتير المبيعات
+        </a>
+        <a href="{% url 'reservations_list' %}" class="section-btn">
+            <i class="fa-solid fa-calendar-check nav-icon"></i> الحجوزات
+        </a>
+
+        <a href="{% url 'unreturned_invoices' %}" class="section-btn">
+            <i class="fa-solid fa-clock-rotate-left nav-icon"></i> فساتين مستأجرة
+        </a>
+         <a href="{% url 'all_customer_payments' %}" class="section-btn">
+            <i class="fa-solid fa-file-lines nav-icon"></i> تسديدات العملاء
+        </a>
+    </div>
+
+    <div class="section-page" id="section-customers">
+        <a href="{% url 'customers_list' %}" class="section-btn">
+            <i class="fa-solid fa-users nav-icon"></i> جميع العملاء
+        </a>
+        <a href="{% url 'customers_create' %}" class="section-btn">
+            <i class="fa-solid fa-user-plus nav-icon"></i> إضافة عميل
+        </a>
+    </div>
+
+    <div class="section-page" id="section-management">
+        {% if user.can_see_all_data %}
+        <a href="{% url 'users_list' %}" class="section-btn">
+            <i class="fa-solid fa-user-group nav-icon"></i> المستخدمون
+        </a>
+         <a href="{% url 'employees_performance' %}" class="section-btn">
+            <i class="fa-solid fa-user-group nav-icon"></i> دخل المستخدمين
+        </a>
+        {% endif %}
+        
+        {% if user.can_see_all_data or user.is_accountant %}
+        <a href="{% url 'employee_list' %}" class="section-btn">
+            <i class="fa-solid fa-user-tie nav-icon"></i> الموظفون
+        </a>
+        <a href="{% url 'absence_list' %}" class="section-btn">
+            <i class="fa-solid fa-calendar-xmark nav-icon"></i> الغيابات
+        </a>
+        <a href="{% url 'expense_list' %}" class="section-btn">
+            <i class="fa-solid fa-money-bill-wave nav-icon"></i> المصروفات
+        </a>
+        <a href="{% url 'payment_methods_list' %}" class="section-btn">
+            <i class="fa-solid fa-credit-card nav-icon"></i> طرق الدفع
+        </a>
+        {% endif %}
+    </div>
+
+    <div class="main-content">
+
+        <header class="topbar">
+            <div class="topbar-left">
+                <h1 class="page-title">{% block page_title %}{% endblock %}</h1>
+            </div>
+            <div class="topbar-right">
+                {% if user.is_authenticated %}
+                <span style="font-size:13px;color:#6b7280;">مرحباً، {{ user.first_name|default:user.username }}</span>
+                {% if today_reservations_count > 0 %}
+                <span class="topbar-badge" style="background:#ef4444;color:#fff;">
+                    <i class="fa-regular fa-bell"></i> {{ today_reservations_count }} حجوزات اليوم
+                </span>
+                {% endif %}
+                {% endif %}
+            </div>
+        </header>
+
+        <div class="mobile-header">
+            <div class="page-title-mobile">{% block mobile_title %}{% endblock %}</div>
+            <div class="user-avatar-small">
+                {{ user.first_name|first|default:user.username|first }}
+            </div>
+        </div>
+
+        <main class="page-content">
+            {% if messages %}
+            <div style="margin-bottom:16px;">
+                {% for message in messages %}
+                <div class="alert alert-{% if message.tags == 'error' %}danger{% elif message.tags == 'success' %}success{% elif message.tags == 'warning' %}warning{% else %}info{% endif %}" data-auto-dismiss>
+                    <span>{{ message }}</span>
+                </div>
+                {% endfor %}
+            </div>
+            {% endif %}
+
+            {% block content %}{% endblock %}
+        </main>
+
+    </div>
+
+    <nav class="bottom-nav" role="navigation" aria-label="القائمة السفلية">
+        <button class="bottom-nav-link active" data-section="home" aria-expanded="true">
+            <i class="fa-solid fa-house nav-icon"></i>
+            <span class="nav-label">الرئيسية</span>
+        </button>
+        
+        <button class="bottom-nav-link" data-section="reservations" aria-expanded="false">
+            <i class="fa-solid fa-calendar-check nav-icon"></i>
+            <span class="nav-label">الحجوزات</span>
+            <span class="nav-badge {% if today_reservations_count == 0 %}zero{% endif %}">{{ today_reservations_count }}</span>
+        </button>
+        
+        <button class="bottom-nav-link" data-section="dresses" aria-expanded="false">
+            <i class="fa-solid fa-shirt nav-icon"></i>
+            <span class="nav-label">الفساتين</span>
+        </button>
+        
+        <button class="bottom-nav-link" data-section="sales" aria-expanded="false">
+            <i class="fa-solid fa-file-invoice-dollar nav-icon"></i>
+            <span class="nav-label">المبيعات</span>
+        </button>
+        
+        <button class="bottom-nav-link" data-section="customers" aria-expanded="false">
+            <i class="fa-solid fa-users nav-icon"></i>
+            <span class="nav-label">العملاء</span>
+        </button>
+        
+        <button class="bottom-nav-link" data-section="management" aria-expanded="false">
+            <i class="fa-solid fa-gears nav-icon"></i>
+            <span class="nav-label">الإدارة</span>
+        </button>
+    </nav>
+
+</div>
+
+<script>
+(function() {
+
+    var sectionButtons = document.querySelectorAll('.top-nav-link, .bottom-nav-link');
+    var sectionPages = {
+        home: document.getElementById('section-home'),
+        reservations: document.getElementById('section-reservations'),
+        dresses: document.getElementById('section-dresses'),
+        sales: document.getElementById('section-sales'),
+        customers: document.getElementById('section-customers'),
+        management: document.getElementById('section-management')
+    };
+
+    function activateSection(sectionId) {
+        document.querySelectorAll('.top-nav-link, .bottom-nav-link').forEach(function(btn) {
+            btn.classList.remove('active');
+            btn.setAttribute('aria-expanded', 'false');
+        });
+
+        document.querySelectorAll('.top-nav-link[data-section="' + sectionId + '"], .bottom-nav-link[data-section="' + sectionId + '"]').forEach(function(btn) {
+            btn.classList.add('active');
+            btn.setAttribute('aria-expanded', 'true');
+        });
+
+        Object.keys(sectionPages).forEach(function(key) {
+            if (sectionPages[key]) {
+                sectionPages[key].classList.remove('active');
+            }
+        });
+
+        if (sectionPages[sectionId]) {
+            sectionPages[sectionId].classList.add('active');
+        }
+    }
+
+    sectionButtons.forEach(function(btn) {
+        btn.addEventListener('click', function(e) {
+            e.preventDefault();
+            var section = this.getAttribute('data-section');
+            if (section) {
+                activateSection(section);
+                if (window.innerWidth <= 768) {
+                    window.scrollTo({ top: 0, behavior: 'smooth' });
+                }
+            }
+        });
+
+        btn.addEventListener('touchstart', function(e) {
+        }, { passive: true });
+    });
+
+    function getCurrentSectionFromUrl() {
+        var url = window.location.pathname;
+        
+        var sectionMap = {
+            'statistics': 'home',
+            'reservations': 'reservations',
+            'categories': 'dresses',
+            'products': 'dresses',
+            'inventory': 'dresses',
+            'repair': 'dresses',
+            'barcode': 'dresses',
+            'invoice': 'sales',
+            'unreturned': 'sales',
+            'customers': 'customers',
+            'users': 'management',
+            'employee': 'management',
+            'absence': 'management',
+            'expense': 'management',
+            'payment': 'management'
+        };
+
+        for (var key in sectionMap) {
+            if (url.includes(key)) {
+                return sectionMap[key];
+            }
+        }
+        return 'home';
+    }
+
+    var currentSection = getCurrentSectionFromUrl();
+    activateSection(currentSection);
+
+    document.querySelectorAll('.section-btn').forEach(function(btn) {
+        btn.addEventListener('click', function() {
+            setTimeout(function() {
+                var newSection = getCurrentSectionFromUrl();
+                activateSection(newSection);
+            }, 100);
+        });
+    });
+
+    document.querySelectorAll('[data-auto-dismiss]').forEach(function(alert) {
+        setTimeout(function() {
+            alert.style.opacity = '0';
+            alert.style.transition = 'opacity 0.5s';
+            setTimeout(function() {
+                if (alert.parentNode) alert.parentNode.removeChild(alert);
+            }, 500);
+        }, 5000);
+    });
+
+    document.querySelectorAll('form').forEach(function(form) {
+        form.addEventListener('submit', function() {
+            var buttons = this.querySelectorAll('button[type="submit"], input[type="submit"]');
+            buttons.forEach(function(btn) {
+                if (!btn.disabled) {
+                    btn.disabled = true;
+                    var orig = btn.innerHTML;
+                    btn.innerHTML = 'جاري...';
+                    setTimeout(function() {
+                        if (btn.disabled) { btn.innerHTML = orig; btn.disabled = false; }
+                    }, 8000);
+                }
+            });
+        });
+    });
+
+    document.querySelectorAll('[data-confirm]').forEach(function(btn) {
+        btn.addEventListener('click', function(e) {
+            var msg = this.getAttribute('data-confirm') || 'هل أنت متأكد؟';
+            if (!confirm(msg)) e.preventDefault();
+        });
+    });
+
+})();
+</script>
+
+{% block extra_js %}{% endblock %}
+</body>
+</html>

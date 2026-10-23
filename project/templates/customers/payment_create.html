@@ -1,0 +1,182 @@
+{% extends 'base.html' %}
+{% load humanize %}
+{% block title %}تسديد دين {{ customer.full_name }}{% endblock %}
+{% block page_title %}تسديد دين العميل{% endblock %}
+
+{% block content %}
+<div class="card" style="max-width:600px;margin:0 auto;">
+  <div class="card-header">
+    <span class="card-title">تسديد دين العميل</span>
+  </div>
+  <div class="card-body">
+
+    <div class="info-box">
+      <div class="info-grid">
+        <div>
+          <div class="text-muted">اسم العميل</div>
+          <div class="fw-bold" style="font-size:16px;">{{ customer.full_name }}</div>
+        </div>
+        <div>
+          <div class="text-muted">رقم الهاتف</div>
+          <div dir="ltr">{{ customer.phone }}</div>
+        </div>
+        <div style="grid-column:span 2;">
+          <div class="text-muted">إجمالي الدين</div>
+          <div class="fw-bold text-danger" style="font-size:24px;">{{ debt_amount|floatformat:2|intcomma }} د.ل</div>
+        </div>
+      </div>
+    </div>
+
+    
+<form method="post">
+  {% csrf_token %}
+
+  <div class="form-group">
+    <label class="form-label">اختر الفاتورة *</label>
+
+    <select name="invoice_id" id="invoice-select"
+            class="form-control" required>
+      <option value="">-- اختر الفاتورة --</option>
+
+      {% for invoice in invoices %}
+        <option value="{{ invoice.pk }}"
+                data-remaining="{{ invoice.remaining_amount }}">
+          {{ invoice.invoice_number }}
+          — الإجمالي: {{ invoice.total_amount|floatformat:2 }}
+          — المتبقي: {{ invoice.remaining_amount|floatformat:2 }} د.ل
+        </option>
+      {% endfor %}
+    </select>
+
+    {% if not invoices %}
+      <small class="text-danger">
+        لا توجد فواتير عليها مبالغ متبقية لهذا العميل.
+      </small>
+    {% endif %}
+  </div>
+
+  <div class="form-group">
+    <label class="form-label">المبلغ المراد تسديده *</label>
+
+    <input type="number" name="amount" id="payment-amount"
+           class="form-control" step="0.01" min="0.01"
+           required placeholder="اختر الفاتورة أولاً" disabled>
+
+    <small class="text-muted" id="remaining-help">
+      اختر الفاتورة لمعرفة المبلغ المتبقي.
+    </small>
+  </div>
+{% if request.user.is_main_admin %}
+    <div class="form-group">
+        <label class="form-label">تاريخ الدفع</label>
+        <input
+            type="date"
+            name="payment_date"
+            class="form-control"
+            value="{{ today|date:'Y-m-d' }}"
+        >
+    </div>
+{% endif %}
+  <div class="form-group">
+    <label class="form-label">ملاحظات</label>
+    <textarea name="notes" class="form-control" rows="3"
+              placeholder="ملاحظات الدفعة"></textarea>
+  </div>
+
+  <div class="action-row">
+    <button type="submit" class="btn btn-success"
+            style="flex:1;" {% if not invoices %}disabled{% endif %}>
+      تأكيد التسديد
+    </button>
+
+    <a href="{% url 'customers_detail' customer.pk %}"
+       class="btn btn-outline" style="flex:1;">
+      إلغاء
+    </a>
+  </div>
+</form>
+
+
+  </div>
+</div>
+
+<style>
+  .info-box { background: #eff6ff; padding: 16px; border-radius: 12px; margin-bottom: 20px; }
+  .info-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  .action-row { display: flex; gap: 10px; margin-top: 20px; flex-wrap: wrap; }
+  .btn { display: inline-flex; align-items: center; justify-content: center; gap: 6px; padding: 10px 20px; border: none; border-radius: 8px; font-size: 14px; font-weight: 600; cursor: pointer; transition: all 0.2s; text-decoration: none; min-height: 44px; touch-action: manipulation; white-space: nowrap; box-sizing: border-box; }
+  .btn-success { background: #16a34a; color: #fff; }
+  .btn-success:hover { background: #15803d; color: #fff; }
+  .btn-outline { background: transparent; border: 1.5px solid #eaecf0; color: #374151; }
+  .btn-outline:hover { background: #f8f9fb; }
+  .form-control { width: 100%; padding: 10px 14px; border: 1.5px solid #eaecf0; border-radius: 8px; font-size: 14px; background: #fff; color: #1a2236; box-sizing: border-box; transition: border-color 0.2s; }
+  .form-control:focus { outline: none; border-color: #D4AF37; box-shadow: 0 0 0 4px rgba(232,121,58,0.12); }
+  .form-label { display: block; font-size: 13px; font-weight: 600; color: #374151; margin-bottom: 4px; }
+  .form-group { margin-bottom: 16px; }
+  .card { background: #fff; border-radius: 12px; border: 1px solid #eaecf0; box-shadow: 0 1px 3px rgba(0,0,0,0.04); margin-bottom: 20px; }
+  .card-header { padding: 14px 16px; border-bottom: 1px solid #eaecf0; display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+  .card-title { font-size: 15px; font-weight: 700; color: #1a2236; margin: 0; }
+  .card-body { padding: 16px; }
+  .text-muted { color: #6b7280; font-size: 12px; }
+  .text-danger { color: #dc2626; }
+  .fw-bold { font-weight: 700; }
+  .spinner { display: inline-block; width: 14px; height: 14px; border: 2px solid #fff; border-top: 2px solid transparent; border-radius: 50%; animation: spin 0.8s linear infinite; vertical-align: middle; margin-left: 5px; }
+  @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+
+  @media (max-width: 480px) {
+    .info-grid { grid-template-columns: 1fr; }
+    .info-grid > div:last-child { grid-column: span 1; }
+    .card-body { padding: 12px; }
+  }
+</style>
+
+
+
+{% block extra_js %}
+
+<script>
+document.addEventListener('DOMContentLoaded', function () {
+    const invoiceSelect = document.getElementById('invoice-select');
+    const amountInput = document.getElementById('payment-amount');
+    const remainingHelp = document.getElementById('remaining-help');
+
+    invoiceSelect.addEventListener('change', function () {
+        const option = this.options[this.selectedIndex];
+
+        if (!option.value) {
+            amountInput.disabled = true;
+            amountInput.value = '';
+            amountInput.removeAttribute('max');
+            remainingHelp.textContent =
+                'اختر الفاتورة لمعرفة المبلغ المتبقي.';
+            return;
+        }
+
+        const remaining = Number(option.dataset.remaining);
+
+        amountInput.disabled = false;
+        amountInput.value = '';
+        amountInput.max = remaining.toFixed(2);
+        amountInput.placeholder = 'أقصى مبلغ: ' + remaining.toFixed(2);
+
+        remainingHelp.textContent =
+            'المبلغ المتبقي في الفاتورة: ' +
+            remaining.toFixed(2) + ' د.ل';
+    });
+
+    document.querySelector('form').addEventListener('submit', function (e) {
+        const option = invoiceSelect.options[invoiceSelect.selectedIndex];
+        const amount = Number(amountInput.value);
+        const remaining = Number(option.dataset.remaining);
+
+        if (!option.value || !Number.isFinite(amount) ||
+            amount <= 0 || amount > remaining) {
+            e.preventDefault();
+            alert('اختر فاتورة صحيحة، ولا يمكن أن يتجاوز المبلغ المتبقي.');
+        }
+    });
+});
+</script>
+{% endblock %}
+
+{% endblock %}

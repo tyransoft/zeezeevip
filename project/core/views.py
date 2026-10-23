@@ -1,0 +1,3731 @@
+from django.http import JsonResponse
+from django.shortcuts import render, redirect, get_object_or_404
+from django.contrib.auth import login, logout, authenticate
+from django.contrib.auth.decorators import login_required
+from django.contrib import messages
+import json
+from .forms import *
+from django.core.paginator import Paginator
+from decimal import Decimal, InvalidOperation
+from django.db.models import Q ,Sum, Count
+from django.views.decorators.csrf import csrf_exempt
+from datetime import datetime, timedelta,time
+from django.utils import timezone
+from django.urls import reverse
+from math import ceil
+import re
+from django.views.decorators.http import require_POST
+from django.utils.dateparse import parse_date
+from .models import *
+
+def normalize_arabic(text):
+    text = text.strip().lower()
+    text = re.sub(r'[أإآٱ]', 'ا', text)
+    text = re.sub(r'[ىئ]', 'ي', text)
+    text = text.replace('ؤ', 'و').replace('ة', 'ه')
+    text = re.sub(r'[\u064B-\u065F\u0670ـ]', '', text)
+    text = re.sub(r'\s+', ' ', text)
+    return text
+
+
+
+@login_required
+def home(request):
+    user = request.user
+    if not request.user.is_authenticated:
+        return redirect('user_login')
+    else:  
+        return redirect('statistics')
+      
+
+def login_view(request):
+    if request.user.is_authenticated:
+        return redirect('statistics')
+    if request.method == 'POST':
+        form = LoginForm(request.POST)
+        if form.is_valid():
+            username = form.cleaned_data['username']
+            password = form.cleaned_data['password']
+            user = authenticate(request, username=username, password=password)
+            if user and user.is_active:
+                login(request, user)
+                if user.is_accountant() or user.can_see_all_data():
+                  return redirect('statistics')
+  
+                return redirect('create_invoice')
+            else:
+                messages.error(request, 'اسم المستخدم أو كلمة المرور غير صحيحة')
+    else:
+        form = LoginForm()
+    return render(request, 'accounts/login.html', {'form': form})
+
+
+@login_required
+def logout_view(request):
+
+    logout(request)
+    return redirect('user_login')
+
+
+@login_required
+def users_list(request):
+    if not request.user.can_see_all_data():
+        messages.error(request, 'ليس لديك صلاحية للوصول لهذه الصفحة')
+        return redirect('statistics')
+    users = CustomUser.objects.all().order_by('username')
+    return render(request, 'accounts/users_list.html', {'users': users})
+
+
+@login_required
+def user_create(request):
+    if not request.user.can_see_all_data():
+        messages.error(request, 'ليس لديك صلاحية للوصول لهذه الصفحة')
+        return redirect('statistics')
+    if request.method == 'POST':
+        form = UserCreateForm(request.POST)
+        if form.is_valid():
+            user = form.save()
+    
+            messages.success(request, f'تم إنشاء المستخدم {user.username} بنجاح')
+            return redirect('users_list')
+    else:
+        form = UserCreateForm()
+    return render(request, 'accounts/user_form.html', {'form': form, 'title': 'إضافة مستخدم جديد'})
+
+
+@login_required
+def user_edit(request, pk):
+    if not request.user.can_see_all_data():
+        messages.error(request, 'ليس لديك صلاحية للوصول لهذه الصفحة')
+        return redirect('statistics')
+    user = get_object_or_404(CustomUser, pk=pk)
+    if request.method == 'POST':
+        form = UserEditForm(request.POST, instance=user)
+        if form.is_valid():
+            form.save()
+          
+            messages.success(request, 'تم تحديث بيانات المستخدم بنجاح')
+            return redirect('users_list')
+    else:
+        form = UserEditForm(instance=user)
+    return render(request, 'accounts/user_form.html', {'form': form, 'title': 'تعديل المستخدم', 'user_obj': user})
+
+
+@login_required
+def user_delete(request, pk):
+    if not request.user.is_main_admin():
+        messages.error(request, 'غير مصرح لك بهذه العملية')
+        return redirect('users_list')
+    
+    user = get_object_or_404(CustomUser, pk=pk)
+    
+    if user == request.user:
+        messages.error(request, 'لا يمكنك حذف حسابك الخاص')
+        return redirect('users_list')
+    
+    user.delete()
+    messages.success(request, f'تم حذف المستخدم {user.get_full_name() or user.username} بنجاح')
+    return redirect('users_list')
+
+
+
+@login_required
+def product_list(request):
+    query = request.GET.get('q', '')
+    category_id = request.GET.get('category', '')
+    status = request.GET.get('status', '')
+
+    products = Product.objects.filter(is_active=True)
+    if query:
+      normalized_query = normalize_arabic(query)
+
+      matching_ids = [
+        p.id
+        for p in products.only('id', 'name').iterator()
+        if normalized_query in normalize_arabic(p.name)
+      ]
+
+      products = products.filter(
+        Q(id__in=matching_ids) |
+        Q(barcode__icontains=query)
+      )
+    if category_id:
+        products = products.filter(category=category_id)
+    if status:
+        products = products.filter(status=status)
+
+    categories = Category.objects.filter(is_active=True)
+
+    return render(request, 'products/list.html', {
+        'products': products,
+        'categories': categories,
+        'query': query,
+        'selected_category': category_id,
+        'selected_status': status,
+        'status_choices': Dstatus.choices,
+    })
+
+
+
+@login_required
+def product_create(request):
+
+    
+    if request.method == 'POST':
+        form = ProductForm(request.POST, request.FILES)
+        if form.is_valid():
+            form.save()        
+            messages.success(request,"تم اضافة الفستان بنجاح")            
+            return redirect('products_list')
+    else:
+        form = ProductForm()
+    
+    return render(request, 'products/form.html', {'form': form, 'title': 'إضافة منتج جديد'})
+
+@login_required
+def product_edit(request, pk):
+    product = get_object_or_404(Product, pk=pk)
+    if not request.user.is_main_admin():
+        messages.error(request, 'فقط الفرع الرئيسي يمكنه تعديل أسعار المنتجات')
+        return redirect('products_list')
+    if request.method == 'POST':
+        form = ProductForm(request.POST, request.FILES, instance=product)
+        if form.is_valid():
+            form.save()
+        
+            messages.success(request, 'تم تحديث بيانات المنتج بنجاح')
+            return redirect('products_list')
+    else:
+        form = ProductForm(instance=product)
+    return render(request, 'products/form.html', {'form': form, 'title': f'تعديل: {product.name}', 'product': product})
+
+def product_detail(request, pk):
+    product = get_object_or_404(Product, pk=pk)
+    
+    month_filter = request.GET.get('month')
+    year_filter = request.GET.get('year')
+    
+    history = []
+    
+    invoice_items = InvoiceItem.objects.filter(product=product)
+    total_rentals = 0
+    old_revenues = ProductOldRevenue.objects.filter(product=product)
+    
+    if month_filter and year_filter:
+        old_revenues = old_revenues.filter(date__month=month_filter, date__year=year_filter)
+        invoice_items = invoice_items.filter(invoice__created_at__month=month_filter, invoice__created_at__year=year_filter)
+    
+    total_revenue = old_revenues.aggregate(Sum('amount'))['amount__sum'] or 0
+    
+    total_new_revenue = 0
+    total_rent_revenue = 0
+    total_sale_revenue = 0
+    
+    for item in invoice_items:
+        if item.invoice.invoice_type == InvoiceType.RENT:
+            if item.invoice.status != InvoiceStatus.CANCELLED :
+              total_rentals += 1
+              total_new_revenue += item.total_price
+              total_rent_revenue += item.total_price
+            history.append({
+                'type': 'rent',
+                'type_display': 'إيجار',
+                'details': f'فاتورة {item.invoice.invoice_number} - {item.days} أيام',
+                'amount': item.total_price,
+                'date': item.invoice.created_at.date()
+            })
+        elif item.invoice.invoice_type == InvoiceType.SALE:
+            if item.invoice.status != InvoiceStatus.CANCELLED :
+
+             total_new_revenue += item.total_price
+             total_sale_revenue += item.total_price
+            history.append({
+                'type': 'sale',
+                'type_display': 'بيع',
+                'details': f'فاتورة {item.invoice.invoice_number}',
+                'amount': item.total_price,
+                'date': item.invoice.created_at.date()
+            })
+    
+    repairs = RepairAndClean.objects.filter(product=product)
+    total_maintenance = repairs.count()
+    
+    for repair in repairs:
+        history.append({
+            'type': 'repair' if repair.kind == 'repair' else 'clean',
+            'type_display': 'تصليح' if repair.kind == 'repair' else 'تنظيف',
+            'details': f'{repair.notes or "بدون ملاحظات"}',
+            'amount': repair.total_cost,
+            'date': repair.created_at
+        })
+    
+    total_old_revenue = 0
+    for old in old_revenues:
+        total_old_revenue += old.amount
+        history.append({
+            'type': 'old_revenue',
+            'type_display': 'إيراد قديم',
+            'details': old.notes or 'إيراد سابق',
+            'amount': old.amount,
+            'date': old.date
+        })
+    
+    history.sort(key=lambda x: x['date'], reverse=True)
+    
+    total_revenue = total_new_revenue + total_old_revenue
+    total_profit = total_revenue - product.cost_price
+    
+    current_month = timezone.now().month
+    current_year = timezone.now().year
+    
+    current_month_old = ProductOldRevenue.objects.filter(
+        product=product,
+        date__month=current_month,
+        date__year=current_year
+    ).aggregate(Sum('amount'))['amount__sum'] or 0
+    
+    current_month_new = InvoiceItem.objects.filter(
+        product=product,
+        invoice__created_at__month=current_month,
+        invoice__created_at__year=current_year
+    ).aggregate(Sum('total_price'))['total_price__sum'] or 0
+    
+    current_month_total = current_month_old + current_month_new
+    
+    years = ProductOldRevenue.objects.filter(product=product).dates('date', 'year')
+    invoice_years = InvoiceItem.objects.filter(product=product).dates('invoice__created_at', 'year')
+    all_years = sorted(set([y.year for y in years] + [y.year for y in invoice_years]))
+    
+    context = {
+        'product': product,
+        'history': history,
+        'total_rentals': total_rentals,
+        'total_maintenance': total_maintenance,
+        'total_revenue': total_revenue,
+        'total_profit': total_profit,
+        'total_new_revenue': total_new_revenue,
+        'total_old_revenue': total_old_revenue,
+        'total_rent_revenue': total_rent_revenue,
+        'total_sale_revenue': total_sale_revenue,
+        'current_month_total': current_month_total,
+        'current_month_old': current_month_old,
+        'current_month_new': current_month_new,
+        'years': all_years,
+        'selected_month': int(month_filter) if month_filter else None,
+        'selected_year': int(year_filter) if year_filter else None,
+        'now': timezone.now(),
+    }
+    return render(request, 'products/detail.html', context)
+
+@login_required
+def product_delete(request, pk):
+    if not request.user.is_main_admin():
+        messages.error(request, 'غير مصرح')
+        return redirect('products_list')
+
+    product = get_object_or_404(Product, pk=pk)
+    product.delete()
+
+    messages.success(request, 'تم حذف المنتج بنجاح')
+    return redirect('products_list')
+
+
+@login_required
+def category_list(request):
+    categories = Category.objects.all()
+    return render(request, 'products/categories.html', {'categories': categories})
+
+
+@login_required
+def category_create(request):
+    if not request.user.is_main_admin():
+        messages.error(request, 'ليس لديك صلاحية لإضافة فئات')
+        return redirect('categories')
+    if request.method == 'POST':
+        form = CategoryForm(request.POST)
+        if form.is_valid():
+            form.save()
+            messages.success(request, 'تم إضافة الفئة بنجاح')
+            return redirect('categories')
+    else:
+        form = CategoryForm()
+    return render(request, 'products/category_form.html', {'form': form, 'title': 'إضافة فئة جديدة'})
+
+@login_required
+def category_edit(request, category_id):
+    category = get_object_or_404(Category, id=category_id)
+    
+    if not request.user.is_main_admin():
+        messages.error(request, 'ليس لديك صلاحية لتعديل الفئات')
+        return redirect('categories')
+    
+    if request.method == 'POST':
+        form = CategoryForm(request.POST, instance=category)
+        if form.is_valid():
+            form.save()
+            messages.success(request, 'تم تحديث الفئة بنجاح')
+            return redirect('categories')
+    else:
+        form = CategoryForm(instance=category)
+    
+    return render(request, 'products/category_form.html', {
+        'form': form, 
+        'title': 'تعديل الفئة',
+        'category': category
+    })
+
+@login_required
+def product_search_ajax(request):
+    query = request.GET.get('q', '')
+    branch_id = request.GET.get('branch_id', '')
+    if query:
+      normalized_query = normalize_arabic(query)
+
+      matching_ids = [
+        p.id
+        for p in products.only('id', 'name').iterator()
+        if normalized_query in normalize_arabic(p.name)
+      ]
+
+      products = products.filter(
+        Q(id__in=matching_ids) |
+        Q(barcode__icontains=query)
+     )
+    data = []
+    for p in products:
+        stock = 0
+        if branch_id:
+            stock = p.get_branch_stock(branch_id)
+        data.append({
+            'id': p.pk,
+            'name': p.name,
+            'sell_price':float(p.sell_price),
+        })
+
+    return JsonResponse({'products': data})
+
+@login_required
+def products_bulk_price_update(request):
+    if not request.user.is_main_admin():
+        messages.error(request, 'غير مصرح لك بتعديل أسعار المنتجات')
+        return redirect('products_list')
+    
+    query = request.GET.get('q', '')
+    category_id = request.GET.get('category', '')
+    page = request.GET.get('page', 1)
+    products = Product.objects.filter(is_active=True)
+    
+    if query:
+        products = products.filter(Q(name__icontains=query) | Q(barcode__icontains=query))
+    if category_id:
+        products = products.filter(category_id=category_id)
+    
+    products = products.order_by('name')
+    
+    paginator = Paginator(products, 20)
+    page_obj = paginator.get_page(page)
+    
+    categories = Category.objects.filter(is_active=True)
+    
+    if request.method == 'POST':
+        selected_products_str = request.POST.get('selected_products', '')
+        
+        if selected_products_str:
+            selected_products = [int(x) for x in selected_products_str.split(',') if x.strip().isdigit()]
+        else:
+            selected_products = []
+        
+        increase_type = request.POST.get('increase_type', 'fixed')
+        increase_value = Decimal(request.POST.get('increase_value', 0))
+        
+        if not selected_products:
+            messages.error(request, 'الرجاء اختيار منتج واحد على الأقل')
+            return redirect('products_bulk_price_update')
+        
+        if increase_value <= 0:
+            messages.error(request, 'الرجاء إدخال قيمة زيادة أكبر من صفر')
+            return redirect('products_bulk_price_update')
+        
+        updated_count = 0
+        for product_id in selected_products:
+            try:
+                product = Product.objects.get(id=product_id, is_active=True)
+                old_price = product.selling_price
+                
+                if increase_type == 'fixed':
+                    new_price = old_price + increase_value
+                else:  
+                    new_price = old_price + (old_price * increase_value / 100)
+                
+                product.selling_price = round(new_price, 2)
+                product.save()
+                updated_count += 1
+                
+            except Product.DoesNotExist:
+                continue
+        
+        messages.success(request, f'تم تحديث {updated_count} منتج بنجاح')
+        return redirect('products_bulk_price_update')
+    
+    context = {
+        'products': page_obj,
+        'categories': categories,
+        'query': query,
+        'selected_category': category_id,
+        'total_count': products.count(),
+    }
+    return render(request, 'products/bulk_price_update.html', context)
+
+
+
+def payment_methods_list(request):
+    payment_methods = PaymentMethod.objects.all()
+    
+    search_query = request.GET.get('search', '')
+    if search_query:
+        payment_methods = payment_methods.filter(name__icontains=search_query)
+    
+    sort_by = request.GET.get('sort', 'name')
+    payment_methods = payment_methods.order_by(sort_by)
+    
+    paginator = Paginator(payment_methods, 20)
+    page_number = request.GET.get('page')
+    page_obj = paginator.get_page(page_number)
+    
+    context = {
+        'page_obj': page_obj,
+        'search_query': search_query,
+        'sort_by': sort_by,
+    }
+    return render(request, 'payment_methods/list.html', context)
+
+def payment_method_create(request):
+    if request.method == 'POST':
+        form = PaymentMethodForm(request.POST)
+        if form.is_valid():
+            payment_method = form.save()
+            messages.success(request, f'تم إضافة طريقة الدفع "{payment_method.name}" بنجاح')
+            return redirect('payment_methods_list')
+    else:
+        form = PaymentMethodForm()
+    
+    context = {'form': form}
+    return render(request, 'payment_methods/form.html', context)
+
+def payment_method_edit(request, pk):
+    payment_method = get_object_or_404(PaymentMethod, pk=pk)
+    
+    if request.method == 'POST':
+        form = PaymentMethodForm(request.POST, instance=payment_method)
+        if form.is_valid():
+            payment_method = form.save()
+            messages.success(request, f'تم تعديل طريقة الدفع "{payment_method.name}" بنجاح')
+            return redirect('payment_methods_list')
+    else:
+        form = PaymentMethodForm(instance=payment_method)
+    
+    context = {'form': form, 'payment_method': payment_method}
+    return render(request, 'payment_methods/form.html', context)
+
+def payment_method_delete(request, pk):
+    payment_method = get_object_or_404(PaymentMethod, pk=pk)
+    
+    if request.method == 'POST':
+        method_name = payment_method.name
+        payment_method.delete()
+        messages.success(request, f'تم حذف طريقة الدفع "{method_name}" بنجاح')
+        return redirect('payment_methods_list')
+    
+    context = {'payment_method': payment_method}
+    return render(request, 'payment_methods/confirm_delete.html', context)
+
+def payment_method_toggle_status(request, pk):
+    payment_method = get_object_or_404(PaymentMethod, pk=pk)
+    payment_method.is_active = not payment_method.is_active
+    payment_method.save()
+    
+    status = 'مفعلة' if payment_method.is_active else 'غير مفعلة'
+    messages.success(request, f'تم {status} طريقة الدفع "{payment_method.name}"')
+    return redirect('payment_methods_list')
+
+
+@login_required
+def reservations_list(request):
+    today = timezone.localdate()
+
+    start_date = request.GET.get('start_date', '').strip()
+    end_date = request.GET.get('end_date', '').strip()
+
+    reservations = (
+        Invoice.objects.all( )
+        .select_related('customer', 'payment_method')
+        .prefetch_related('items__product')
+    )
+
+    if start_date:
+        try:
+           
+
+            reservations = reservations.filter(
+                rent_start_date=start_date
+            )
+        except ValueError:
+            start_date = ''
+
+    if end_date:
+        try:
+       
+
+            reservations = reservations.filter(
+                rent_start_date=end_date
+            )
+        except ValueError:
+            end_date = ''
+
+    total_pending = Invoice.objects.filter(
+        status=InvoiceStatus.PENDING,
+        invoice_type=InvoiceType.RENT
+    ).count()
+
+    today_reservations = Invoice.objects.filter(
+        status=InvoiceStatus.PENDING,
+        invoice_type=InvoiceType.RENT,
+        rent_start_date=today
+    ).count()
+
+    context = {
+        'reservations': reservations,
+        'total_pending': total_pending,
+        'today_reservations': today_reservations,
+        'today': today.strftime('%Y-%m-%d'),
+        'start_date': start_date
+            if start_date else '',
+        'end_date': end_date
+            if end_date else '',
+        'is_today_filter': request.GET.get('today') == '1',
+    }
+
+    return render(request, 'reservations_list.html', context)
+@login_required
+def reservation_detail(request, invoice_id):
+    try:
+        reservation = Invoice.objects.get(
+            id=invoice_id
+        )
+        
+
+        
+    except Invoice.DoesNotExist:
+        messages.error(request, 'الحجز غير موجود')
+        return redirect('reservations_list')
+    
+    rental_days = 0
+    if reservation.rent_start_date and reservation.rent_end_date:
+        rental_days = (reservation.rent_end_date - reservation.rent_start_date).days + 1
+    
+    items_data = []
+    for item in reservation.items.all():  
+        items_data.append({
+            'item': item,
+            'product': item.product,
+            'days': item.days,
+            'unit_price': item.unit_price,
+            'total_price': item.total_price,
+        })
+    
+    context = {
+        'reservation': reservation,
+        'items_data': items_data,
+        'rental_days': rental_days,
+        'total_items': reservation.items.count(),
+    }
+    return render(request, 'reservation_detail.html', context)
+
+
+
+
+@login_required
+def repair_list(request):
+    repairs = RepairAndClean.objects.select_related('product', 'provider').all()
+    
+    query = request.GET.get('q', '')
+    kind_filter = request.GET.get('kind', '')
+    status_filter = request.GET.get('status', '')
+    payment_filter = request.GET.get('payment_status', '')
+    
+    if query:
+      normalized_query = normalize_arabic(query)
+
+      matching_ids = [
+        p.id
+        for p in Product.objects.only('id', 'name').iterator()
+        if normalized_query in normalize_arabic(p.name)
+      ]
+
+      repairs = repairs.filter(
+        Q(product_id__in=matching_ids) |
+        Q(product__barcode__icontains=query)
+      )
+    if kind_filter:
+        repairs = repairs.filter(kind=kind_filter)
+    if status_filter:
+        repairs = repairs.filter(status=status_filter)
+    if payment_filter:
+        repairs = repairs.filter(payment_status=payment_filter)
+    
+    total_stats = {
+        'total_cost': repairs.aggregate(Sum('total_cost'))['total_cost__sum'] or 0,
+        'total_paid': repairs.aggregate(Sum('paid_amount'))['paid_amount__sum'] or 0,
+        'total_remaining': 0,
+        'unpaid_count': repairs.filter(payment_status__in=['unpaid', 'partial']).count(),
+    }
+    total_stats['total_remaining'] = total_stats['total_cost'] - total_stats['total_paid']
+    
+    paginator = Paginator(repairs, 20)
+    page_number = request.GET.get('page')
+    page_obj = paginator.get_page(page_number)
+    
+    context = {
+        'repairs': page_obj,
+        'title': 'طلبات الصيانة والتنظيف',
+        'query': query,
+        'kind_filter': kind_filter,
+        'status_filter': status_filter,
+        'payment_filter': payment_filter,
+        'kind_choices': RepairAndClean.KIND,
+        'status_choices': RepairAndClean.STATUS,
+        'total_stats': total_stats,
+    }
+    return render(request, 'repairs/repair_list.html', context)
+
+
+@login_required
+def repair_create(request):
+    if request.method == 'POST':
+        form = RepairAndCleanForm(request.POST)
+        if form.is_valid():
+            repair = form.save()
+            messages.success(request, 'تم إضافة طلب الصيانة بنجاح')
+            return redirect('repair_detail', pk=repair.pk)
+    else:
+        form = RepairAndCleanForm()
+    
+    context = {
+        'form': form,
+        'title': 'إضافة طلب صيانة جديد',
+        'is_edit': False,
+    }
+    return render(request, 'repairs/repair_form.html', context)
+
+
+@login_required
+def repair_edit(request, pk):
+    repair = get_object_or_404(RepairAndClean, pk=pk)
+    
+    if request.method == 'POST':
+        form = RepairAndCleanForm(request.POST, instance=repair)
+        if form.is_valid():
+            form.save()
+            messages.success(request, 'تم تحديث طلب الصيانة بنجاح')
+            return redirect('repair_detail', pk=repair.pk)
+    else:
+        form = RepairAndCleanForm(instance=repair)
+    
+    context = {
+        'form': form,
+        'title': 'تعديل طلب الصيانة',
+        'is_edit': True,
+        'repair': repair,
+    }
+    return render(request, 'repairs/repair_form.html', context)
+
+
+@login_required
+def repair_detail(request, pk):
+    repair = get_object_or_404(RepairAndClean, pk=pk)
+    
+    context = {
+        'repair': repair,
+        'title': f'تفاصيل طلب الصيانة - {repair.product.name}',
+    }
+    return render(request, 'repairs/repair_detail.html', context)
+
+
+@login_required
+def repair_delete(request, pk):
+    repair = get_object_or_404(RepairAndClean, pk=pk)
+    
+    if request.method == 'POST':
+        product = repair.product
+        product.cost_price -= repair.total_cost
+        product.save()
+        repair.delete()
+        messages.success(request, 'تم حذف طلب الصيانة بنجاح')
+        return redirect('repair_list')
+    
+    context = {
+        'repair': repair,
+        'title': 'حذف طلب الصيانة',
+    }
+    return render(request, 'repairs/repair_delete.html', context)
+
+
+@login_required
+def repair_finish(request, pk):
+    repair = get_object_or_404(RepairAndClean, pk=pk)
+    
+    if request.method == 'POST':
+        repair.mark_as_finished()
+        messages.success(request, 'تم تأكيد استلام الصيانة بنجاح')
+        return redirect('repair_detail', pk=repair.pk)
+    
+    return redirect('repair_detail', pk=repair.pk)
+
+
+@login_required
+def repair_payment(request, pk):
+    repair = get_object_or_404(RepairAndClean, pk=pk)
+    
+    if request.method == 'POST':
+        form = RepairPaymentForm(request.POST, instance=repair)
+        if form.is_valid():
+            repair = form.save()
+            repair.update_payment_status()
+            
+            if repair.paid_amount > 0 and repair.provider:
+                ProviderPayment.objects.create(
+                    provider=repair.provider,
+                    service=repair,
+                    amount=repair.paid_amount,
+                    payment_date=datetime.now().date(),
+                    status='paid',
+                    notes=f'دفعة للخدمة: {repair.product.name}'
+                )
+            
+            messages.success(request, 'تم تسجيل الدفعة بنجاح')
+            return redirect('repair_detail', pk=repair.pk)
+    else:
+        form = RepairPaymentForm(instance=repair)
+    
+    context = {
+        'form': form,
+        'repair': repair,
+        'title': f'تسجيل دفعة للخدمة - {repair.product.name}',
+    }
+    return render(request, 'repairs/repair_payment.html', context)
+
+
+
+
+
+
+
+
+
+
+
+
+
+@login_required
+def customer_list(request):
+    query = request.GET.get('q', '').strip()
+    customers = Customer.objects.filter(is_active=True)
+
+    if query:
+      normalized_query = normalize_arabic(query)
+ 
+      matching_ids = [
+        c.id
+        for c in customers.only('id', 'full_name').iterator()
+        if normalized_query in normalize_arabic(c.full_name)
+      ]
+
+      customers = customers.filter(
+        Q(id__in=matching_ids) |
+        Q(phone__icontains=query)
+      )
+    return render(request, 'customers/list.html', {'customers': customers, 'query': query})
+
+
+@login_required
+def customer_create(request):
+    if request.method == 'POST':
+        form = CustomerForm(request.POST)
+        if form.is_valid():
+            customer = form.save(commit=False)
+            customer.save()
+           
+            messages.success(request, f'تم إضافة العميل "{customer.full_name}" بنجاح')
+            return redirect('customers_list')
+    else:
+        form = CustomerForm()
+    return render(request, 'customers/form.html', {'form': form, 'title': 'إضافة عميل جديد'})
+
+
+@login_required
+def customer_edit(request, pk):
+    customer = get_object_or_404(Customer, pk=pk)
+    if request.method == 'POST':
+        form = CustomerForm(request.POST, instance=customer)
+        if form.is_valid():
+            form.save()
+            messages.success(request, 'تم تحديث بيانات العميل بنجاح')
+            return redirect('customers_detail', pk=pk)
+    else:
+        form = CustomerForm(instance=customer)
+    return render(request, 'customers/form.html', {'form': form, 'title': f'تعديل: {customer.full_name}', 'customer': customer})
+
+
+
+
+@login_required
+def customer_detail(request, pk):
+    customer = get_object_or_404(Customer, pk=pk)
+
+    invoices = Invoice.objects.filter(
+        customer=customer).prefetch_related(
+        'items__product' 
+    ).order_by('-created_at')
+
+    total_invoices = invoices.count()
+    total_purchases = sum((i.total_amount or 0) for i in invoices)
+    total_paid = sum((i.paid_amount or 0) for i in invoices)
+    total_remaining = sum((i.remaining_amount or 0) for i in invoices)
+
+    penalties = Penalty.objects.filter(
+        invoice__customer=customer
+    ).order_by('-created_at')
+
+    total_penalties = sum((p.amount or 0) for p in penalties)
+    penalties_count = penalties.count()
+
+    all_payments = CustomerPayment.objects.filter(
+        customer=customer
+    ).order_by('-payment_date')
+
+    total_payments = sum((p.amount or 0) for p in all_payments)
+
+    # فلترة المدفوعات
+    payment_from = request.GET.get('payment_from', '')
+    payment_to = request.GET.get('payment_to', '')
+    payment_search = request.GET.get('payment_search', '').strip()
+
+    payments = all_payments
+
+    if payment_from:
+        payments = payments.filter(payment_date__date__gte=payment_from)
+
+    if payment_to:
+        payments = payments.filter(payment_date__date__lte=payment_to)
+
+    if payment_search:
+        payments = payments.filter(
+            Q(notes__icontains=payment_search) |
+            Q(receipt_number__icontains=payment_search)
+        )
+    penalties = Penalty.objects.filter(
+     invoice__customer=customer
+      ).select_related(
+          'invoice', 'payment'
+      ).order_by('-created_at')
+    history = []
+
+    for invoice in invoices:
+        history.append({
+            'type': 'invoice',
+            'type_display': 'فاتورة',
+            'invoice_number': invoice.invoice_number,
+            'invoice_type': invoice.get_invoice_type_display(),
+            'total': invoice.total_amount,
+            'paid': invoice.paid_amount,
+            'remaining': invoice.remaining_amount,
+            'status': invoice.get_status_display(),
+            'status_class': invoice.status,
+            'date': invoice.created_at,
+        })
+
+    for penalty in penalties:
+        history.append({
+            'type': 'penalty',
+            'type_display': 'غرامة',
+            'invoice_number': penalty.invoice.invoice_number,
+            'reason': penalty.reason,
+            'amount': penalty.amount,
+            'date': penalty.created_at,
+        })
+
+    for payment in all_payments:
+        history.append({
+            'type': 'payment',
+            'type_display': 'تسديد',
+            'amount': payment.amount,
+            'notes': payment.notes,
+            'receipt_number': payment.receipt_number,
+            'date': payment.payment_date,
+        })
+
+    history.sort(key=lambda x: x['date'], reverse=True)
+
+    return render(request, 'customers/detail.html', {
+        'customer': customer,
+        'invoices': invoices,
+        'total_invoices': total_invoices,
+        'total_purchases': total_purchases,
+        'total_paid': total_paid,
+        'total_remaining': total_remaining,
+        'total_penalties': total_penalties,
+        'penalties_count': penalties_count,
+        'total_payments': total_payments,
+        'payments': payments,
+        'payment_from': payment_from,
+        'payment_to': payment_to,
+        'penalties': penalties,
+        'payment_search': payment_search,
+        'history': history,
+    })
+
+@login_required
+def customer_search_ajax(request):
+    query = request.GET.get('q', '')
+    customers = Customer.objects.filter(
+        Q(full_name__icontains=query) | Q(phone__icontains=query) | Q(customer_id__icontains=query),
+        is_active=True
+    )[:10]
+    data = [{
+        'id': c.pk, 
+        'full_name': c.full_name, 
+        'phone': c.phone, 
+        'customer_id': c.customer_id,
+        'debt_balance': float(c.debt_balance)
+    } for c in customers]
+    return JsonResponse({'customers': data})
+
+
+from decimal import Decimal, InvalidOperation
+
+
+
+@login_required
+def customer_payment_create(request, pk):
+    customer = get_object_or_404(Customer, pk=pk)
+
+    if request.method == 'POST':
+        invoice_id = request.POST.get('invoice_id')
+
+        try:
+            amount = Decimal(request.POST.get('amount', '0'))
+        except (InvalidOperation, TypeError, ValueError):
+            messages.error(request, 'المبلغ المدخل غير صحيح')
+            return redirect('customer_payment_create', pk=pk)
+
+        notes = request.POST.get('notes', '')
+
+        if not amount.is_finite() or amount <= 0:
+            messages.error(request, 'المبلغ يجب أن يكون أكبر من صفر')
+            return redirect('customer_payment_create', pk=pk)
+
+        payment_date = timezone.localdate()
+
+        if request.user.is_main_admin:
+           date_raw = request.POST.get('payment_date', '').strip()
+
+        if date_raw:
+          try:
+            payment_date = datetime.strptime(
+                date_raw, '%Y-%m-%d'
+            ).date()
+          except ValueError:
+            messages.error(request, 'تاريخ الدفع غير صحيح.')
+            return redirect('customer_payment_create', pk=pk)
+
+        with transaction.atomic():
+            customer = get_object_or_404(
+                Customer.objects.select_for_update(),
+                pk=pk
+            )
+
+            invoice = get_object_or_404(
+                Invoice.objects.select_for_update(),
+                pk=invoice_id,
+                customer=customer,
+                remaining_amount__gt=0,
+              
+            )
+
+            if amount > invoice.remaining_amount:
+                messages.error(
+                    request,
+                    f'المبلغ أكبر من المتبقي في الفاتورة '
+                    f'{invoice.invoice_number} '
+                    f'({invoice.remaining_amount:,.2f} د.ل)'
+                )
+                return redirect('customer_payment_create', pk=pk)
+
+            payment = CustomerPayment.objects.create(
+                customer=customer,
+                invoice=invoice,
+                amount=amount,
+                payment_date=payment_date,
+                notes=notes,
+                created_by=request.user
+            )
+
+            invoice.paid_amount = (
+                invoice.paid_amount or Decimal('0.00')
+            ) + amount
+
+            invoice.remaining_amount = (
+                invoice.total_amount - invoice.paid_amount
+            )
+
+            if invoice.remaining_amount <= 0:
+                invoice.remaining_amount = Decimal('0.00')
+                invoice.status = InvoiceStatus.PAID
+            else:
+                invoice.status = InvoiceStatus.PARTIAL
+
+            invoice.save(update_fields=[
+                'paid_amount',
+                'remaining_amount',
+                'status',
+                'updated_at',
+            ])
+
+            customer.debt_balance = max(
+                Decimal('0.00'),
+                (customer.debt_balance or Decimal('0.00')) - amount
+            )
+
+            customer.save(update_fields=[
+                'debt_balance',
+                'updated_at',
+            ])
+
+        messages.success(
+            request,
+            f'تم تسديد {amount:,.2f} د.ل من الفاتورة '
+            f'{invoice.invoice_number} للعميل {customer.full_name}'
+        )
+
+        return redirect('customer_payment_receipt', pk=payment.pk)
+
+    invoices = Invoice.objects.filter(
+        customer=customer,
+        remaining_amount__gt=0,
+       
+    ).order_by('created_at', 'pk')
+
+    context = {
+        'customer': customer,
+        'debt_amount': customer.debt_balance,
+        'invoices': invoices,
+        'today': timezone.localdate(),
+
+    }
+
+    return render(
+        request,
+        'customers/payment_create.html',
+        context
+    )
+
+
+@login_required
+def customer_payment_receipt(request, pk):
+    payment = get_object_or_404(CustomerPayment, pk=pk)
+    
+    if not request.user.is_main_admin() and payment.created_by != request.user:
+        messages.error(request, 'غير مصرح لك بمشاهدة هذا الإيصال')
+        return redirect('customers_list')
+    
+    return render(request, 'customers/payment_receipt.html', {'payment': payment})
+
+
+@login_required
+def customer_payments_history(request, pk):
+    customer = get_object_or_404(Customer, pk=pk)
+    payments = CustomerPayment.objects.filter(customer=customer).order_by('-payment_date')
+    total_paid = payments.aggregate(total=Sum('amount'))['total'] or Decimal('0')
+    return render(request, 'customers/payments_history.html', {
+        'customer': customer,
+        'total_paid':total_paid,
+        'payments': payments,
+    })    
+
+
+@csrf_exempt
+def confirm_return(request, invoice_id):
+    invoice = get_object_or_404(Invoice, id=invoice_id)
+    
+    if request.method == 'POST':
+        confirm = request.POST.get('confirm_return') == 'true'
+        
+        if confirm:
+            if invoice.remaining_amount > 0:
+                remaining = invoice.remaining_amount
+                invoice.paid_amount += remaining
+                invoice.remaining_amount = 0
+                
+                CustomerPayment.objects.create(
+                    invoice=invoice,
+                    customer=invoice.customer,
+                    amount=remaining,
+                    created_by=request.user,
+                    notes=f'تسوية  عند استلام الفاتورة {invoice.invoice_number}'
+                )
+                customer = Customer.objects.get(id=invoice.customer.id)
+                customer.debt_balance = max(Decimal('0.00'), customer.debt_balance - invoice.remaining_amount)
+
+            for item in invoice.items.all():
+                item.product.status = Dstatus.AVAILABLE
+                item.product.save()
+            
+            invoice.status = InvoiceStatus.RECIEVED
+            invoice.identity_verified_return=True
+            invoice.save()
+
+            messages.success(request, 'تم تأكيد استلام جميع المنتجات بنجاح')
+            return redirect('invoice_list')
+    
+    penalties = invoice.penalties.all() if hasattr(invoice, 'penalties') else []
+    total_penalties = invoice.penalties.aggregate(total=models.Sum('amount'))['total'] or Decimal('0')
+    
+    context = {
+        'invoice': invoice,
+        'penalties': penalties,
+        'total_penalties': total_penalties,
+        'can_confirm': True,
+        'delay_info': {
+            'is_delayed': False,
+            'delay_days': 0,
+            'delay_hours': 0
+        }
+    }
+    
+    if invoice.rent_end_date and invoice.invoice_type == InvoiceType.RENT:
+        now = timezone.now()
+        end_date = invoice.rent_end_date
+        
+        end_datetime = None
+        
+        if end_date.weekday() == 4:
+            end_datetime = timezone.make_aware(
+                datetime.combine(end_date, time(16, 0, 0))
+            )
+        else:
+            end_datetime = timezone.make_aware(
+                datetime.combine(end_date, time(22, 0, 0))
+            )
+        
+        if end_datetime and now > end_datetime:
+            diff = now - end_datetime
+            total_seconds = diff.total_seconds()
+            total_hours = total_seconds / 3600
+            delay_days = int(total_hours // 24)
+            delay_hours = int(total_hours % 24)
+            
+            context['delay_info'] = {
+                'is_delayed': True,
+                'delay_days': delay_days,
+                'delay_hours': delay_hours + (delay_days * 24)
+            }
+    
+    return render(request, 'invoices/confirm_return.html', context)
+
+@csrf_exempt
+def add_penalty(request):
+    if request.method == 'POST':
+        invoice_id = request.POST.get('invoice_id')
+        amount = request.POST.get('amount')
+        reason = request.POST.get('reason')
+        
+        invoice = get_object_or_404(Invoice, id=invoice_id)
+        
+        penalty = Penalty.objects.create(
+            invoice=invoice,
+            amount=amount,
+            reason=reason,
+            created_at=timezone.now(),
+        )
+        
+        invoice.total_amount += Decimal(amount)
+        invoice.remaining_amount = invoice.total_amount - invoice.paid_amount
+        invoice.save()
+        
+        messages.success(request, 'تم إضافة الغرامة بنجاح')
+        return redirect('confirm_return', invoice_id=invoice_id)
+    
+    return redirect('invoice_list')
+
+
+def calculate_delay(invoice):
+    if not invoice.rent_end_date:
+        return {'is_delayed': False, 'delay_days': 0, 'delay_hours': 0}
+    
+    now = timezone.now().date()
+    end_date = invoice.rent_end_date
+    
+    if now > end_date:
+        delay_days = (now - end_date).days
+        return {
+            'is_delayed': True,
+            'delay_days': delay_days,
+            'delay_hours': delay_days * 24,
+        }
+    
+    return {'is_delayed': False, 'delay_days': 0, 'delay_hours': 0}
+
+
+
+def print_receipt(request, invoice_id):
+    invoice = get_object_or_404(Invoice, id=invoice_id)  
+    penalties = Penalty.objects.filter(invoice=invoice)
+    
+    context = {
+        'invoice': invoice,
+        'penalties': penalties,
+  
+    }
+    return render(request, 'invoices/print_receipt.html', context)
+
+
+@login_required
+def create_invoice(request):
+    if request.method == 'GET':
+        products = Product.objects.filter(
+            is_active=True
+        ).exclude(
+    status=Dstatus.SOLD).order_by('id')
+
+        search = request.GET.get('search', '').strip()
+
+        if search:
+            products = products.filter(
+                Q(name__icontains=search) |
+                Q(barcode__icontains=search)
+            )
+
+
+        customers = Customer.objects.filter(is_active=True)
+        payment_methods = PaymentMethod.objects.filter(is_active=True)
+
+        context = {
+            'products': products,
+            'customers': customers,
+            'payment_methods': payment_methods,
+            'invoice_types': InvoiceType.choices,
+            'search': search,
+        }
+
+        return render(
+            request,
+            'invoices/create_invoice.html',
+            context
+        )
+
+    elif request.method == 'POST':
+        try:
+            if request.content_type == 'application/json':
+                data = json.loads(request.body)
+            else:
+                data = request.POST.dict()
+
+                products_data = []
+
+                for key, value in data.items():
+                  if key.startswith('product_') and key.endswith('_id'):
+                    product_id = int(value)
+
+                    days_key = key.replace('_id', '_days')
+                    price_key = key.replace('_id', '_price')
+
+                    products_data.append({
+                     'product_id': product_id,
+                     'days': int(data.get(days_key, 1)),
+                     'price': float(data.get(price_key, 0)),
+                   })
+
+                    cart = products_data            
+            
+               
+            if not cart:
+                messages.error(request, 'السلة فارغة')
+                return redirect('invoice_list')
+            
+            invoice_type = data.get('invoice_type', InvoiceType.RENT)
+            
+            if invoice_type == InvoiceType.RENT:
+                rent_start_date = data.get('rent_start_date')
+                rent_end_date = data.get('rent_end_date')
+                
+                if not rent_start_date or not rent_end_date:
+                    messages.error(request, 'يرجى تحديد تاريخ بداية ونهاية الإيجار')
+                    return redirect('invoice_list')
+                
+                try:
+                    rent_start_date = datetime.strptime(rent_start_date, '%Y-%m-%d').date()
+                    rent_end_date = datetime.strptime(rent_end_date, '%Y-%m-%d').date()
+                except ValueError:
+                    messages.error(request, 'صيغة التاريخ غير صحيحة')
+                    return redirect('invoice_list')
+                
+                if rent_start_date > rent_end_date:
+                    messages.error(request, 'تاريخ البداية يجب أن يكون قبل تاريخ النهاية')
+                    return redirect('invoice_list')
+                
+                for item in cart:
+                    try:
+                        product = Product.objects.get(id=item['product_id'])
+                        
+                        if product.status == Dstatus.SOLD:
+                            messages.error(request, f'المنتج {product.name} تم بيعه ولا يمكن تأجيره')
+                            return redirect('invoice_list')
+                        if product.category.name == 'خدمة':
+                            messages.error(request, f'المنتج {product.name}  لا يمكن تأجيره')
+
+                            return redirect('invoice_list')
+  
+                          
+                        is_available, message = Invoice.check_product_availability(
+                            product, rent_start_date, rent_end_date
+                        )
+                        
+                        if not is_available:
+                            messages.error(request, f'المنتج {product.name}: {message}')
+                            return redirect('invoice_list')
+                            
+                    except Product.DoesNotExist:
+                        messages.error(request, f'المنتج غير موجود')
+                        return redirect('invoice_list')
+            
+            invoice = Invoice()
+            invoice.invoice_number = invoice.generate_invoice_number()
+            invoice.invoice_type = invoice_type
+            invoice.created_by=request.user 
+            customer_id = data.get('customer_id')
+            is_cash_customer = data.get('is_cash_customer', '0') == '1'
+            date =data.get('created_date')
+            if date:
+                invoice.created_at = datetime.strptime(date, '%Y-%m-%d %H:%M:%S')
+            else:
+                invoice.created_at = timezone.now()    
+            if is_cash_customer:
+                invoice.customer = None
+            elif customer_id:
+                try:
+                    invoice.customer = Customer.objects.get(id=int(customer_id))
+                except Customer.DoesNotExist:
+                    messages.error(request, 'العميل غير موجود')
+                    return redirect('invoice_list')
+            if invoice.customer:
+              today = timezone.localdate()
+
+              for item in cart:
+                 product_id = item['product_id']
+
+                 already_exists = Invoice.objects.filter(
+                  customer=invoice.customer,
+                  created_at__date=today,
+                   items__product_id=product_id,
+                   ).exclude(
+                       status=InvoiceStatus.CANCELLED
+                    ).exists()
+
+                 if already_exists:
+                   product = Product.objects.filter(pk=product_id).first()
+                   product_name = product.name if product else f'رقم {product_id}'
+
+                   messages.error(
+                      request,
+                     f'لا يمكن إنشاء الفاتورة: المنتج "{product_name}" '
+                      f'له فاتورة سابقة لهذا العميل اليوم.'
+                       )
+                   return redirect('invoice_list')
+
+            invoice.discount = Decimal(str(data.get('discount', '0')))
+            invoice.commission = Decimal(str(data.get('commission', '0')))
+            invoice.extra_amount = Decimal(str(data.get('extra_amount', '0')))
+            invoice.paid_amount = Decimal(str(data.get('paid_amount', '0')))
+
+            if invoice_type == InvoiceType.RENT:
+                invoice.rent_start_date = rent_start_date
+                invoice.rent_end_date = rent_end_date
+            else:
+                invoice.rent_start_date = None
+                invoice.rent_end_date = None
+                invoice.sale_price = Decimal(str(data.get('sale_price', '0')))
+                if invoice.paid_amount > invoice.sale_price:
+                    messages.error(request, 'المبلغ المدفوع أكبر من سعر البيع')
+                    return redirect('invoice_list')
+            
+            payment_method_id = data.get('payment_method')
+            if payment_method_id:
+                try:
+                    invoice.payment_method = PaymentMethod.objects.get(id=int(payment_method_id))
+                except PaymentMethod.DoesNotExist:
+                    pass
+            
+            invoice.notes = data.get('notes', '')
+            invoice.identity_verified = data.get('identity_verified', 'true') in ['true', 'True', '1', 'on']
+            
+            invoice.save()
+                   
+            invoice.total_amount = Decimal('0')
+            
+            for cart_item in cart:
+                product = Product.objects.get(id=cart_item['product_id'])
+                
+                if invoice_type == InvoiceType.RENT:
+                    is_available, message = Invoice.check_product_availability(
+                        product, rent_start_date, rent_end_date, exclude_invoice=invoice
+                    )
+                    
+                    if not is_available:
+                        invoice.delete()
+                        messages.error(request, f'المنتج {product.name}: {message}')
+                        return redirect('invoice_list')
+                    
+                    product.status = Dstatus.RENTED
+                    product.save()
+                    
+                    days = cart_item.get('days', 1)
+                    
+                    invoice_item = InvoiceItem.objects.create(
+                        invoice=invoice,
+                        product=product,
+                        days=days,
+                        unit_price=product.selling_price
+                    )
+                    invoice.total_amount += invoice_item.days * invoice_item.unit_price
+                    
+                else:
+                    if product.status == Dstatus.RENTED:
+                        invoice.delete()
+                        messages.error(request, f'المنتج {product.name} مؤجر حالياً ولا يمكن بيعه')
+                        return redirect('invoice_list')
+
+                    if product.category.name != 'خدمة':
+
+                       product.status = Dstatus.SOLD
+                    product.save()
+                    
+                    invoice_item = InvoiceItem.objects.create(
+                        invoice=invoice,
+                        product=product,
+                        days=1,
+                        unit_price=invoice.sale_price
+                    )
+                    if invoice_type != InvoiceType.RENT:
+                       invoice.total_amount = invoice.sale_price  
+
+            invoice.total_amount -= invoice.discount
+            invoice.total_amount += invoice.commission
+            invoice.total_amount += invoice.extra_amount
+
+            if invoice.total_amount == invoice.paid_amount:
+                invoice.remaining_amount = 0
+                note = f'تم دفع كامل المبلغ عند الحجز {invoice.invoice_number}'
+            else:  
+              invoice.remaining_amount = invoice.total_amount - invoice.paid_amount
+              note = f' عربون {invoice.paid_amount}د.ل عند الحجز {invoice.invoice_number}'
+            if invoice_type == InvoiceType.RENT:
+              invoice.status = InvoiceStatus.PENDING
+            else:
+              if invoice.remaining_amount > Decimal('0'):
+                invoice.status = InvoiceStatus.PARTIAL
+              else:
+               invoice.status = InvoiceStatus.RECIEVED
+            if invoice.customer and invoice.remaining_amount > Decimal('0'):
+                invoice.customer.debt_balance += invoice.remaining_amount
+                invoice.customer.save()
+            
+            invoice.save()
+            
+            if invoice.paid_amount > 0:
+                           CustomerPayment.objects.create(
+                             invoice=invoice,
+                             customer=invoice.customer,
+                             amount=invoice.paid_amount,
+                             created_by=request.user,
+                             payment_date=timezone.now(),
+                              notes=note
+                                 
+                            )   
+            messages.success(request, 'تم إضافة الفاتورة بنجاح')
+            return redirect('print_receipt', invoice.pk)
+            
+        except Exception as e:
+            messages.error(request, f'حدث خطأ: {str(e)}')
+            return redirect('invoice_list')
+    
+    messages.error(request, 'حدث خطأ غير معروف!')
+    return redirect('invoice_list')
+
+@login_required
+def mark_as_delivered(request, invoice_id):
+    if request.method != 'POST':
+        return JsonResponse({
+            'success': False,
+            'message': 'طريقة غير مدعومة'
+        })
+    
+    invoice = get_object_or_404(Invoice, id=invoice_id)
+    
+    if invoice.status != InvoiceStatus.PENDING:
+        return JsonResponse({
+            'success': False,
+            'message': 'الفاتورة ليست قيد الانتظار'
+        })
+    
+    if invoice.invoice_type != 'rent':
+        return JsonResponse({
+            'success': False,
+            'message': 'هذه العملية مخصصة لفواتير الايجار فقط'
+        })
+    
+    try:
+        invoice.status = InvoiceStatus.DELIVERED
+        invoice.identity_verified = True
+        invoice.save()
+        
+        for item in invoice.items.all():
+            item.product.status = Dstatus.RENTED
+            item.product.save()
+        
+        return JsonResponse({
+            'success': True,
+            'message': 'تم تسليم الفستان للعميل بنجاح',
+            'invoice_number': invoice.invoice_number,
+            'redirect_url': reverse('print_receipt', args=[invoice.id])
+        })
+        
+    except Exception as e:
+        return JsonResponse({
+            'success': False,
+            'message': str(e)
+        })
+
+from datetime import datetime
+
+def invoice_list(request):
+    invoices = Invoice.objects.all().order_by('-created_at')
+
+
+    product_id = request.GET.get('product_id', '')
+
+    if product_id:
+      invoices = invoices.filter(
+        items__product_id=product_id
+      ).distinct()
+
+
+    status_filter = request.GET.get('status')
+    if status_filter:
+        invoices = invoices.filter(status=status_filter)
+    
+    type_filter = request.GET.get('invoice_type', '')
+    if type_filter:
+        invoices = invoices.filter(invoice_type=type_filter)
+    
+    date_from = request.GET.get('date_from', '')
+    if date_from:
+        try:
+            date_from_parsed = datetime.strptime(date_from, '%Y-%m-%d').date()
+            invoices = invoices.filter(created_at__date__gte=date_from_parsed)
+        except ValueError:
+            date_from = ''
+    
+    date_to = request.GET.get('date_to', '')
+    if date_to:
+        try:
+            date_to_parsed = datetime.strptime(date_to, '%Y-%m-%d').date()
+            invoices = invoices.filter(created_at__date__lte=date_to_parsed)
+        except ValueError:
+            date_to = ''
+    
+    search_query = request.GET.get('search', '').strip()
+   
+
+    if search_query:
+      normalized_query = normalize_arabic(search_query)
+
+      matching_customer_ids = [
+        c.id for c in Customer.objects.only('id', 'full_name').iterator()
+        if normalized_query in normalize_arabic(c.full_name)
+      ]
+
+      invoices = invoices.filter(
+        Q(invoice_number__icontains=search_query) |
+        Q(customer_id__in=matching_customer_ids)
+      )
+
+    total_invoices = invoices.count()
+    total_amount = invoices.aggregate(Sum('total_amount'))['total_amount__sum'] or 0
+    total_paid = invoices.aggregate(Sum('paid_amount'))['paid_amount__sum'] or 0
+    total_remaining = invoices.aggregate(Sum('remaining_amount'))['remaining_amount__sum'] or 0
+    
+    context = {
+        'invoices': invoices,
+        'status_choices': InvoiceStatus.choices,
+        'current_status': status_filter,
+        'search_query': search_query,
+        'total_invoices': total_invoices,
+        'total_amount': total_amount,
+        'total_paid': total_paid,
+        'total_remaining': total_remaining,
+        'invoice_type_choices': InvoiceType.choices,
+        'date_from': date_from,
+        'date_to': date_to,
+    }
+    return render(request, 'invoices/invoice_list.html', context)
+
+@csrf_exempt
+def cancel_invoice(request, invoice_id):
+
+    invoice = get_object_or_404(Invoice, id=invoice_id)
+    
+   
+    if request.method == 'POST':
+        try:
+            
+            invoice.delete()
+            try:
+                customer=Customer.objects.get(id=invoice.customer.id)
+            except Customer.DoesNotExist:
+                customer = None
+            if customer and invoice.remaining_amount > 0:
+                customer.debt_balance -= invoice.remaining_amount
+                customer.save()
+            
+            messages.success(request, f'تم إلغاء الفاتورة  بنجاح')
+            return redirect('invoice_list')
+            
+        except Exception as e:
+            messages.error(request, f'حدث خطأ: {str(e)}')
+            return redirect('reservation_detail', invoice_id=invoice.id)
+    
+    context = {
+        'invoice': invoice,
+    }
+    return render(request, 'invoices/cancel_invoice.html', context)  
+
+@login_required
+def statistics(request):
+    today = timezone.now().date()
+
+    start_date = request.GET.get('start_date')
+    end_date = request.GET.get('end_date')
+
+    if start_date:
+        start_date = datetime.strptime(start_date, '%Y-%m-%d').date()
+    else:
+        start_date = today
+
+    if end_date:
+        end_date = datetime.strptime(end_date, '%Y-%m-%d').date()
+    else:
+        end_date = today
+
+    invoices = Invoice.objects.filter(
+        created_at__date__gte=start_date,
+        created_at__date__lte=end_date
+    ).exclude(status=InvoiceStatus.CANCELLED)
+
+    rent_invoices = invoices.filter(
+        invoice_type=InvoiceType.RENT
+    )
+
+    sale_invoices = invoices.filter(
+        invoice_type=InvoiceType.SALE
+    )
+
+    total_invoices = invoices.count()
+    total_rent_invoices = rent_invoices.count()
+    total_sale_invoices = sale_invoices.count()
+
+    total_revenue = (
+        invoices.aggregate(total=Sum('total_amount'))['total']
+        or Decimal('0')
+    )
+
+    total_rent_revenue = (
+        rent_invoices.aggregate(total=Sum('total_amount'))['total']
+        or Decimal('0')
+    )
+
+    total_sale_revenue = (
+        sale_invoices.aggregate(total=Sum('total_amount'))['total']
+        or Decimal('0')
+    )
+
+
+    customer_payments = CustomerPayment.objects.filter(
+      payment_date__date__gte=start_date,
+      payment_date__date__lte=end_date,
+    )
+
+    total_paid = (
+      customer_payments.aggregate(total=Sum('amount'))['total']
+      or Decimal('0')
+    )
+
+    total_payments = total_paid
+
+
+
+    total_remaining = (
+        invoices.aggregate(total=Sum('remaining_amount'))['total']
+        or Decimal('0')
+    )
+
+    total_discount = (
+        invoices.aggregate(total=Sum('discount'))['total']
+        or Decimal('0')
+    )
+
+    total_commission = (
+        invoices.aggregate(total=Sum('commission'))['total']
+        or Decimal('0')
+    )
+
+    repairs = RepairAndClean.objects.filter(
+        created_at__gte=start_date,
+        created_at__lte=end_date
+    )
+
+    total_repairs = repairs.count()
+
+    total_repair_cost = (
+        repairs.aggregate(total=Sum('total_cost'))['total']
+        or Decimal('0')
+    )
+
+    repair_count = repairs.filter(kind='repair').count()
+    clean_count = repairs.filter(kind='clean').count()
+
+   
+    invoice_items = InvoiceItem.objects.filter(
+        invoice__in=invoices
+    )
+
+    total_items_sold = invoice_items.count()
+
+    total_rent_days = (
+        invoice_items.aggregate(total=Sum('days'))['total']
+        or 0
+    )
+
+    total_products_rented = Product.objects.filter(
+        status=Dstatus.RENTED
+    ).count()
+
+    total_products_sold = Product.objects.filter(
+        status=Dstatus.SOLD
+    ).count()
+
+    total_products_available = Product.objects.filter(
+        status=Dstatus.AVAILABLE
+    ).count()
+
+    total_products_inclean = Product.objects.filter(
+        status=Dstatus.INCLEAN
+    ).count()
+
+    total_products_inrepair = Product.objects.filter(
+        status=Dstatus.INREPAIR
+    ).count()
+
+    top_rented_products = Product.objects.filter(
+        invoiceitem__invoice__in=invoices,
+        invoiceitem__invoice__invoice_type=InvoiceType.RENT
+    ).annotate(
+        rental_count=Count('invoiceitem'),
+        total_rental_revenue=Sum('invoiceitem__total_price')
+    ).order_by('-rental_count')[:10]
+
+    top_sold_products = Product.objects.filter(
+        invoiceitem__invoice__in=invoices,
+        invoiceitem__invoice__invoice_type=InvoiceType.SALE
+    ).annotate(
+        sale_count=Count('invoiceitem'),
+        total_sale_revenue=Sum('invoiceitem__total_price')
+    ).order_by('-sale_count')[:10]
+
+    total_sale_items = invoice_items.filter(
+        invoice__invoice_type=InvoiceType.SALE
+    )
+
+    total_rent_items = invoice_items.filter(
+        invoice__invoice_type=InvoiceType.RENT
+    )
+
+    sale_product_cost = (
+        total_sale_items.aggregate(
+            total=Sum('product__cost_price')
+        )['total']
+        or Decimal('0')
+    )
+
+    rent_product_cost = (
+        total_rent_items.aggregate(
+            total=Sum('product__cost_price')
+        )['total']
+        or Decimal('0')
+    )
+
+    
+    old_revenues = ProductOldRevenue.objects.filter(
+        date__gte=start_date,
+        date__lte=end_date
+    )
+
+    total_old_revenue = (
+        old_revenues.aggregate(total=Sum('amount'))['total']
+        or Decimal('0')
+    )
+    total_penalties = (
+    Penalty.objects.filter(
+        created_at__date__gte=start_date,
+        created_at__date__lte=end_date,
+    ).aggregate(
+        total=Sum('amount')
+    )['total']
+    or Decimal('0')
+)
+
+    total_gross_revenue = (
+        total_revenue + total_old_revenue 
+    )
+
+    
+    expenses = Expense.objects.filter(
+        expense_date__gte=start_date,
+        expense_date__lte=end_date
+    )
+
+    total_expenses = (
+        expenses.aggregate(total=Sum('amount'))['total']
+        or Decimal('0')
+    )
+
+    expenses_by_category = ExpenseCategory.objects.annotate(
+        total=Sum(
+            'expenses__amount',
+            filter=Q(
+                expenses__expense_date__gte=start_date,
+                expenses__expense_date__lte=end_date
+            )
+        )
+    ).filter(total__gt=0)
+
+    expenses_by_category_list = []
+
+    for cat in expenses_by_category:
+        expenses_by_category_list.append({
+            'name': cat.name,
+            'total': cat.total
+        })
+
+    
+    total_salaries_paid = (
+        MonthlySalaryPayment.objects.filter(
+            payment_date__gte=start_date,
+            payment_date__lte=end_date
+        ).aggregate(total=Sum('amount'))['total']
+        or Decimal('0')
+    )
+
+    total_employees = Employee.objects.filter(
+        status='active'
+    ).count()
+
+    total_employee_salary_cost = (
+        Employee.objects.filter(
+            status='active'
+        ).aggregate(total=Sum('monthly_salary'))['total']
+        or Decimal('0')
+    )
+
+    total_absences = AbsenceRecord.objects.filter(
+        absence_date__gte=start_date,
+        absence_date__lte=end_date
+    ).count()
+
+    total_absence_deductions = (
+        AbsenceRecord.objects.filter(
+            absence_date__gte=start_date,
+            absence_date__lte=end_date
+        ).aggregate(total=Sum('deduction_amount'))['total']
+        or Decimal('0')
+    )
+
+    total_operating_expenses = (
+        total_expenses + total_salaries_paid + total_repair_cost
+    )
+
+    total_net_profit = (
+        total_gross_revenue
+        
+        - total_operating_expenses
+    )
+
+    total_gross_profit = total_gross_revenue 
+
+    profit_margin = 0
+
+    if total_gross_revenue > 0:
+        profit_margin = (
+            total_gross_profit / total_gross_revenue
+        ) * 100
+
+    net_profit_margin = 0
+
+    if total_gross_revenue > 0:
+        net_profit_margin = (
+            total_net_profit / total_gross_revenue
+        ) * 100
+
+    rent_percent = 0
+    sale_percent = 0
+
+    if total_gross_revenue > 0:
+        rent_percent = (
+            total_rent_revenue / total_gross_revenue
+        ) * 100
+
+        sale_percent = (
+            total_sale_revenue / total_gross_revenue
+        ) * 100
+
+    rent_old_revenue = (
+        ProductOldRevenue.objects.filter(
+            product__in=Product.objects.filter(
+                invoiceitem__invoice__in=rent_invoices
+            )
+        ).aggregate(total=Sum('amount'))['total']
+        or Decimal('0')
+    )
+
+    sale_old_revenue = (
+        ProductOldRevenue.objects.filter(
+            product__in=Product.objects.filter(
+                invoiceitem__invoice__in=sale_invoices
+            )
+        ).aggregate(total=Sum('amount'))['total']
+        or Decimal('0')
+    )
+
+    rent_profit = total_rent_revenue + rent_old_revenue
+
+    sale_profit = (
+        total_sale_revenue + sale_old_revenue - sale_product_cost
+    )
+
+    
+    daily_stats = []
+
+    for i in range(7):
+        date = today - timedelta(days=i)
+
+        day_invoices = invoices.filter(
+            created_at__date=date
+        )
+
+        daily_stats.append({
+            'date': date,
+            'count': day_invoices.count(),
+            'revenue': (
+                day_invoices.aggregate(
+                    total=Sum('total_amount')
+                )['total']
+                or Decimal('0')
+            )
+        })
+
+    daily_stats.reverse()
+
+    top_customers = Customer.objects.filter(
+        invoice__in=invoices
+    ).annotate(
+        total_spent=Sum('invoice__total_amount'),
+        total_invoices=Count('invoice')
+    ).order_by('-total_spent')[:10]
+
+    context = {
+        'start_date': start_date,
+        'end_date': end_date,
+
+        'total_invoices': total_invoices,
+        'total_rent_invoices': total_rent_invoices,
+        'total_sale_invoices': total_sale_invoices,
+
+        'total_revenue': total_revenue,
+        'total_rent_revenue': total_rent_revenue,
+        'total_sale_revenue': total_sale_revenue,
+
+        'total_paid': total_paid,
+        'total_remaining': total_remaining,
+        'total_payments': total_payments,
+
+        'total_penalties': total_penalties,
+        'total_discount': total_discount,
+        'total_commission': total_commission,
+
+        'total_repairs': total_repairs,
+        'total_repair_cost': total_repair_cost,
+        'repair_count': repair_count,
+        'clean_count': clean_count,
+
+        'total_items_sold': total_items_sold,
+        'total_rent_days': total_rent_days,
+
+        'total_products_rented': total_products_rented,
+        'total_products_sold': total_products_sold,
+        'total_products_available': total_products_available,
+        'total_products_inclean': total_products_inclean,
+        'total_products_inrepair': total_products_inrepair,
+
+        'top_rented_products': top_rented_products,
+        'top_sold_products': top_sold_products,
+
+        'sale_product_cost': sale_product_cost,
+        'rent_product_cost': rent_product_cost,
+        'total_cost_of_goods_sold': sale_product_cost,
+
+        'total_gross_revenue': total_gross_revenue,
+        'total_old_revenue': total_old_revenue,
+        'total_gross_profit': total_gross_profit,
+        'total_net_profit': total_net_profit,
+
+        'profit_margin': profit_margin,
+        'net_profit_margin': net_profit_margin,
+
+        'rent_profit': rent_profit,
+        'sale_profit': sale_profit,
+        'rent_percent': rent_percent,
+        'sale_percent': sale_percent,
+
+        'daily_stats': daily_stats,
+
+        'total_expenses': total_expenses,
+        'expenses_by_category': expenses_by_category_list,
+
+        'total_salaries_paid': total_salaries_paid,
+        'total_employees': total_employees,
+        'total_employee_salary_cost': total_employee_salary_cost,
+
+        'total_absences': total_absences,
+        'total_absence_deductions': total_absence_deductions,
+
+        'total_operating_expenses': total_operating_expenses,
+        'top_customers': top_customers,
+    }
+
+    return render(request, 'statistics.html', context)
+
+
+
+@login_required
+def all_customer_payments(request):
+    payments = CustomerPayment.objects.select_related(
+        'customer', 'invoice', 'created_by'
+    ).prefetch_related(
+        'invoice__items__product'
+    ).all()
+
+    # البحث باسم العميل
+    search = request.GET.get('search', '').strip()
+    if search:
+        payments = payments.filter(
+            Q(customer__full_name__icontains=search)
+        )
+
+    # الفلترة حسب تاريخ التسديد
+    date_from = request.GET.get('date_from', '').strip()
+    date_to = request.GET.get('date_to', '').strip()
+    today = timezone.now().date()
+
+    if date_from:
+        payments = payments.filter(payment_date__date__gte=date_from)
+    else:
+        date_from = today 
+        payments = payments.filter(payment_date__date__gte=date_from)
+
+    if date_to:
+        payments = payments.filter(payment_date__date__lte=date_to)
+    else:
+        date_to = today
+        payments = payments.filter(payment_date__date__lte=date_to)
+    # ترتيب المدفوعات من الأحدث إلى الأقدم
+    payments = payments.order_by('-payment_date', '-pk')
+
+    # الإجمالي حسب البحث والفلاتر، قبل تقسيم الصفحات
+    total_paid = payments.aggregate(
+        total=Sum('amount')
+    )['total'] or Decimal('0.00')
+
+    paginator = Paginator(payments, 25)
+    page_number = request.GET.get('page')
+    payments_page = paginator.get_page(page_number)
+
+    return render(request, 'all_customer_payments.html', {
+        'payments': payments_page,
+        'total_paid': total_paid,
+        'search': search,
+        'date_from': date_from,
+        'date_to': date_to,
+    })
+
+
+
+@login_required
+def inventory_report(request):
+    products = Product.objects.filter(is_active=True).order_by('name')
+    
+    total_products = products.count()
+    total_rental_revenue = Decimal('0')
+    total_profit = Decimal('0')
+    
+    for product in products:
+        rental_count = InvoiceItem.objects.filter(
+            product=product,
+            invoice__invoice_type=InvoiceType.RENT
+        ).count()
+        
+        rental_revenue = InvoiceItem.objects.filter(
+            product=product,
+            invoice__invoice_type=InvoiceType.RENT
+        ).aggregate(total=Sum('total_price'))['total'] or Decimal('0')
+        
+        profit = rental_revenue - product.cost_price if rental_revenue > 0 else Decimal('0')
+        
+        product.rental_count = rental_count
+        product.rental_revenue = rental_revenue
+        product.profit = profit
+        
+        total_rental_revenue += rental_revenue
+        total_profit += profit
+    
+    rented_count = Product.objects.filter(status=Dstatus.RENTED).count()
+    available_count = Product.objects.filter(status=Dstatus.AVAILABLE).count()
+    sold_count = Product.objects.filter(status=Dstatus.SOLD).count()
+    inclean_count = Product.objects.filter(status=Dstatus.INCLEAN).count()
+    inrepair_count = Product.objects.filter(status=Dstatus.INREPAIR).count()
+    
+    context = {
+        'products': products,
+        'total_products': total_products,
+        'total_rental_revenue': total_rental_revenue,
+        'total_profit': total_profit,
+        'rented_count': rented_count,
+        'available_count': available_count,
+        'sold_count': sold_count,
+        'inclean_count': inclean_count,
+        'inrepair_count': inrepair_count,
+    }
+    
+    return render(request, 'inventory_report.html', context)
+
+
+
+
+@login_required
+def unreturned_invoices(request):
+    invoices = Invoice.objects.filter(
+        status= InvoiceStatus.DELIVERED,
+        invoice_type=InvoiceType.RENT
+    ).order_by('rent_end_date')
+    
+    for invoice in invoices:
+        is_delayed = False
+        delay_days = 0
+        delay_hours = 0
+        
+        if invoice.rent_end_date:
+            now = timezone.now()
+            end_date = invoice.rent_end_date
+            
+            if end_date.weekday() == 4:
+                end_datetime = timezone.make_aware(
+                    datetime.combine(end_date, time(16, 0, 0))
+                )
+            else:
+                end_datetime = timezone.make_aware(
+                    datetime.combine(end_date, time(22, 0, 0))
+                )
+            
+            if now > end_datetime:
+                diff = now - end_datetime
+                total_hours = diff.total_seconds() / 3600
+                delay_days = int(total_hours // 24)
+                delay_hours = int(total_hours % 24)
+                is_delayed = True
+        
+        invoice.is_delayed = is_delayed
+        invoice.delay_days = delay_days
+        invoice.delay_hours = delay_hours
+    
+    context = {
+        'invoices': invoices,
+        'total_count': invoices.count(),
+        'delayed_count': sum(1 for inv in invoices if inv.is_delayed),
+    }
+    
+    return render(request, 'invoices/unreturned_invoices.html', context)
+
+
+@login_required
+def select_barcodes(request):
+    products = Product.objects.filter(is_active=True).order_by('name')
+    categories = Category.objects.filter(is_active=True)
+    
+    context = {
+        'products': products,
+        'categories': categories,
+    }
+    return render(request, 'select_barcodes.html', context)
+
+
+@login_required
+def print_qr_preview(request):
+
+    if request.method != "POST":
+        return redirect("select_barcodes")
+
+    product_ids = request.POST.getlist("product_ids")
+
+    try:
+        copies = int(request.POST.get("copies", 1))
+    except (TypeError, ValueError):
+        copies = 1
+
+    if copies < 1:
+        messages.warning(
+            request,
+            "عدد النسخ يجب أن يكون نسخة واحدة على الأقل"
+        )
+        return redirect("select_barcodes")
+
+    label_size = request.POST.get("label_size", "medium")
+
+    if not product_ids:
+        messages.warning(
+            request,
+            "الرجاء اختيار منتج واحد على الأقل"
+        )
+        return redirect("select_barcodes")
+
+    products = list(
+        Product.objects.filter(
+            id__in=product_ids,
+            is_active=True
+        )
+    )
+
+    if not products:
+        messages.warning(
+            request,
+            "المنتجات المحددة غير موجودة"
+        )
+        return redirect("select_barcodes")
+
+    for product in products:
+        if not product.qr:
+            product.generate_qr()
+            product.save()
+
+    labels = [
+        product
+        for product in products
+        for _ in range(copies)
+    ]
+
+    labels_per_page = 8
+
+    pages = [
+        labels[start:start + labels_per_page]
+        for start in range(
+            0,
+            len(labels),
+            labels_per_page
+        )
+    ]
+
+    context = {
+        "pages": pages,
+        "copies": copies,
+        "total_labels": len(labels),
+        "total_pages": len(pages),
+        "labels_per_page": labels_per_page,
+        "label_size": label_size,
+    }
+
+    return render(
+        request,
+        "print_barcodes.html",
+        context
+    )
+
+
+
+@login_required
+def product_by_barcode(request, barcode):
+    product = get_object_or_404(Product, barcode=barcode, is_active=True)
+    return render(request, 'products/product_by_barcode.html', {'product': product})    
+
+
+
+@login_required
+def check_product_availability_api(request):
+    if request.method == 'GET':
+        product_id = request.GET.get('product_id')
+        start_date = request.GET.get('start_date')
+        end_date = request.GET.get('end_date')
+        
+        if not all([product_id, start_date, end_date]):
+            return JsonResponse({
+                'available': False,
+                'message': 'جميع الحقول مطلوبة'
+            })
+        
+        try:
+            product = Product.objects.get(id=product_id)
+            start_date = datetime.strptime(start_date, '%Y-%m-%d').date()
+            end_date = datetime.strptime(end_date, '%Y-%m-%d').date()
+            
+            if product.status == Dstatus.SOLD:
+                return JsonResponse({
+                    'available': False,
+                    'message': 'المنتج تم بيعه'
+                })
+            
+           
+            is_available, message = Invoice.check_product_availability(
+                product, start_date, end_date
+            )
+            
+            return JsonResponse({
+                'available': is_available,
+                'message': message
+            })
+            
+        except Product.DoesNotExist:
+            return JsonResponse({
+                'available': False,
+                'message': 'المنتج غير موجود'
+            })
+        except ValueError:
+            return JsonResponse({
+                'available': False,
+                'message': 'صيغة التاريخ غير صحيحة'
+            })
+    
+    return JsonResponse({
+        'available': False,
+        'message': 'طريقة غير مدعومة'
+    })
+
+
+
+
+@login_required
+def employee_list(request):
+    employees = Employee.objects.all()
+    return render(request, 'employee_list.html', {'employees': employees})
+
+@login_required
+def employee_create(request):
+    if request.method == 'POST':
+        full_name = request.POST.get('full_name')
+        position = request.POST.get('position')
+        phone = request.POST.get('phone')
+        monthly_salary = request.POST.get('monthly_salary', 0)
+        
+        employee = Employee(
+            full_name=full_name,
+            position=position,
+            phone=phone,
+
+            payment_type='monthly',
+            
+
+            monthly_salary=monthly_salary,
+        )
+        employee.save()
+        messages.success(request, f'تم إضافة الموظف {full_name} بنجاح')
+        return redirect('employee_list')
+    
+    return render(request, 'employee_form.html', {'title': 'إضافة موظف جديد'})
+
+@login_required
+def employee_edit(request, pk):
+    employee = get_object_or_404(Employee, pk=pk)
+    if request.method == 'POST':
+        employee.full_name = request.POST.get('full_name')
+        employee.position = request.POST.get('position')
+        employee.phone = request.POST.get('phone')
+        employee.monthly_salary = request.POST.get('monthly_salary', 0)
+        employee.status = request.POST.get('status')
+        employee.save()
+        messages.success(request, f'تم تعديل بيانات {employee.full_name}')
+        return redirect('employee_list')
+    
+    return render(request, 'employee_form.html', {'employee': employee, 'title': 'تعديل بيانات موظف'})
+
+@login_required
+def employee_delete(request, pk):
+    employee = get_object_or_404(Employee, pk=pk)
+    if request.method == 'POST':
+        employee.delete()
+        messages.success(request, 'تم حذف الموظف بنجاح')
+        return redirect('employee_list')
+    return render(request, 'employee_confirm_delete.html', {'employee': employee})
+
+@login_required
+def absence_create(request):
+    if request.method == 'POST':
+        employee_id = request.POST.get('employee')
+        absence_date = request.POST.get('absence_date')
+        deduction_amount = request.POST.get('deduction_amount')
+        reason = request.POST.get('reason')
+        
+        employee = get_object_or_404(Employee, pk=employee_id)
+        
+        AbsenceRecord.objects.create(
+            employee=employee,
+            absence_date=absence_date,
+            deduction_amount=deduction_amount,
+            reason=reason
+        )
+        messages.success(request, f'تم تسجيل غياب {employee.full_name} بتاريخ {absence_date}')
+        return redirect('absence_list')
+    
+    employees = Employee.objects.filter(payment_type='monthly', status='active')
+    return render(request, 'absence_form.html', {'employees': employees, 'title': 'تسجيل غياب'})
+
+@login_required
+def absence_list(request):
+    absences = AbsenceRecord.objects.all().select_related('employee')
+    return render(request, 'absence_list.html', {'absences': absences})
+
+@login_required
+def absence_delete(request, pk):
+    absence = get_object_or_404(AbsenceRecord, pk=pk)
+    if request.method == 'POST':
+        absence.delete()
+        messages.success(request, 'تم حذف تسجيل الغياب')
+        return redirect('absence_list')
+    return render(request, 'absence_confirm_delete.html', {'absence': absence})
+
+@login_required
+def monthly_salary_payment(request, employee_id):
+    employee = get_object_or_404(Employee, pk=employee_id, payment_type='monthly')
+    
+    if request.method == 'POST':
+        amount = request.POST.get('amount')
+        payment_date = request.POST.get('payment_date')
+        payment_method = request.POST.get('payment_method')
+        notes = request.POST.get('notes')
+        
+        payment = MonthlySalaryPayment(
+            employee=employee,
+            amount=amount,
+            payment_date=payment_date,
+            payment_method=payment_method,
+            notes=notes,
+            created_by=request.user
+        )
+        payment.save()
+        messages.success(request, f'تم تسديد {amount}د.ل للموظف {employee.full_name}')
+        return redirect('employee_list')
+    
+    return render(request, 'monthly_payment_form.html', {'employee': employee})
+
+@login_required
+def monthly_salary_statement(request, employee_id):
+    employee = get_object_or_404(Employee, pk=employee_id, payment_type='monthly')
+    absences = AbsenceRecord.objects.filter(employee=employee)
+    payments = MonthlySalaryPayment.objects.filter(employee=employee)
+    
+    total_deductions = absences.aggregate(total=Sum('deduction_amount'))['total'] or 0
+    total_paid = payments.aggregate(total=Sum('amount'))['total'] or 0
+    net_salary = employee.monthly_salary - total_deductions
+    remaining = net_salary - total_paid
+    
+    context = {
+        'employee': employee,
+        'absences': absences,
+        'payments': payments,
+        'total_deductions': total_deductions,
+        'total_paid': total_paid,
+        'net_salary': net_salary,
+        'remaining': remaining,
+    }
+    return render(request, 'monthly_statement.html', context)
+
+
+
+
+@login_required
+def expense_list(request):
+    qs = Expense.objects.select_related('category').order_by('-expense_date')
+    cat = request.GET.get('category', '')
+    date_from = request.GET.get('date_from', '')
+    date_to = request.GET.get('date_to', '')
+    
+    if cat:
+        qs = qs.filter(category_id=cat)
+    if date_from:
+        qs = qs.filter(expense_date__gte=date_from)
+    if date_to:
+        qs = qs.filter(expense_date__lte=date_to)
+    
+    paginator = Paginator(qs, 20)
+    page_number = request.GET.get('page')
+    expenses = paginator.get_page(page_number)
+    
+    total = qs.aggregate(t=Sum('amount'))['t'] or 0
+    
+    context = {
+        'expenses': expenses,
+        'categories': ExpenseCategory.objects.all(),
+        'selected_category': cat,
+        'date_from': date_from,
+        'date_to': date_to,
+        'total_amount': total,
+    }
+    return render(request, 'expense_list.html', context)
+
+@login_required
+def expense_print(request):
+    
+    qs = Expense.objects.select_related('category').order_by('-expense_date')
+    
+    cat = request.GET.get('category', '')
+    date_from = request.GET.get('date_from', '')
+    date_to = request.GET.get('date_to', '')
+    
+    if cat:
+        qs = qs.filter(category_id=cat)
+    if date_from:
+        qs = qs.filter(expense_date__gte=date_from)
+    if date_to:
+        qs = qs.filter(expense_date__lte=date_to)
+    
+    total = qs.aggregate(t=Sum('amount'))['t'] or 0
+    
+    category_name = 'جميع الفئات'
+    if cat:
+        category = ExpenseCategory.objects.filter(id=cat).first()
+        if category:
+            category_name = category.name
+    
+    context = {
+        'expenses': qs,
+        'total_amount': total,
+        'date_from': date_from,
+        'date_to': date_to,
+        'category_name': category_name,
+        'now': timezone.now(),
+    }
+    return render(request, 'expense_print.html', context)
+
+@login_required
+def expense_add(request):
+    if request.method == 'POST':
+        form = ExpenseForm(request.POST)
+        if form.is_valid():
+            expense = form.save(commit=False)
+            expense.created_by = request.user
+            expense.save()
+            messages.success(request, 'تم تسجيل المصروف بنجاح')
+            return redirect('expense_list')
+    else:
+        form = ExpenseForm()
+    return render(request, 'expense_form.html', {'form': form})
+
+
+@login_required
+def expense_edit(request, pk):
+    expense = get_object_or_404(Expense, pk=pk)
+    if request.method == 'POST':
+        form = ExpenseForm(request.POST, instance=expense)
+        if form.is_valid():
+            form.save()
+            messages.success(request, 'تم تحديث المصروف')
+            return redirect('expense_list')
+    else:
+        form = ExpenseForm(instance=expense)
+    return render(request, 'expense_form.html', {'form': form})
+
+
+@login_required
+def expense_delete(request, pk):
+    expense = get_object_or_404(Expense, pk=pk)
+    if request.method == 'POST':
+        expense.delete()
+        messages.success(request, 'تم حذف المصروف')
+        return redirect('expense_list')
+    return render(request, 'confirm_delete.html', {'expense': expense})
+
+
+@login_required
+def expense_category_list(request):
+    categories = ExpenseCategory.objects.all()
+    return render(request, 'expense_category_list.html', {'categories': categories})
+
+
+@login_required
+def expense_category_add(request):
+    if request.method == 'POST':
+        form = ExpenseCategoryForm(request.POST)
+        if form.is_valid():
+            form.save()
+            messages.success(request, 'تم إضافة الفئة')
+            return redirect('expense_category_list')
+    else:
+        form = ExpenseCategoryForm()
+    return render(request, 'expense_category_form.html', {'form': form})
+@login_required
+def expense_category_edit(request, pk):
+    category = get_object_or_404(ExpenseCategory, pk=pk)
+    
+    if request.method == 'POST':
+        form = ExpenseCategoryForm(request.POST, instance=category)
+        if form.is_valid():
+            form.save()
+            messages.success(request, 'تم تحديث الفئة بنجاح')
+            return redirect('expense_category_list')
+    else:
+        form = ExpenseCategoryForm(instance=category)
+    
+    context = {
+        'form': form,
+        'object': category,
+        
+    }
+    return render(request, 'expense_category_form.html', context)
+
+
+@login_required
+def employees_performance(request):
+    if not request.user.can_see_all_data():
+        messages.error(request, 'ليس لديك صلاحية لعرض هذه الصفحة')
+        return redirect('statistics')
+
+    employees = CustomUser.objects.all()
+
+    filter_type = request.GET.get('filter_type') 
+    start_date_str = request.GET.get('start_date')
+    end_date_str = request.GET.get('end_date')
+    
+    start_date = None
+    end_date = None
+    
+    today = timezone.now().date()
+    
+    if filter_type == 'today':
+        start_date = today
+        end_date = today
+    elif filter_type == 'month':
+        start_date = today.replace(day=1)
+        end_date = today
+    elif filter_type == 'year':
+        start_date = today.replace(month=1, day=1)
+        end_date = today
+    elif filter_type == 'custom' and start_date_str and end_date_str:
+        try:
+            start_date = datetime.strptime(start_date_str, '%Y-%m-%d').date()
+            end_date = datetime.strptime(end_date_str, '%Y-%m-%d').date()
+        except ValueError:
+            start_date = None
+            end_date = None
+
+    employee_data = []
+    total_income_all = 0
+    total_invoices_all = 0
+
+    for emp in employees:
+        total = emp.get_invoices_total(start_date, end_date)
+        count = emp.get_invoices_count(start_date, end_date)
+        average_invoice = total / count if count > 0 else 0
+
+
+        employee_data.append({
+            'user': emp,
+            'total_income': total,
+            'invoice_count': count,
+            'average_invoice': average_invoice,
+
+        })
+        total_income_all += total
+        total_invoices_all += count
+
+    context = {
+        'employee_data': employee_data,
+        'filter_type': filter_type,
+        'start_date': start_date_str if filter_type == 'custom' else start_date,
+        'end_date': end_date_str if filter_type == 'custom' else end_date,
+        'total_income_all': total_income_all,
+        'total_invoices_all': total_invoices_all,
+        'today': today,
+    }
+    return render(request, 'employees_performance.html', context)
+
+@login_required
+def employee_performance_print(request):
+    today = timezone.now().date()
+    employee_id = request.GET.get('employee_id')
+    
+    invoices = Invoice.objects.filter(
+        created_at__date=today
+    ).exclude(status=InvoiceStatus.CANCELLED)
+    
+    if employee_id:
+        invoices = invoices.filter(created_by_id=employee_id)
+    
+    employees = CustomUser.objects.all()
+    selected_employee = None
+    if employee_id:
+        selected_employee = get_object_or_404(CustomUser, pk=employee_id)
+    
+    total_invoices = invoices.count()
+    total_revenue = invoices.aggregate(total=Sum('total_amount'))['total'] or Decimal('0')
+    total_paid = invoices.aggregate(total=Sum('paid_amount'))['total'] or Decimal('0')
+    total_remaining = invoices.aggregate(total=Sum('remaining_amount'))['total'] or Decimal('0')
+    total_discount = invoices.aggregate(total=Sum('discount'))['total'] or Decimal('0')
+    total_commission = invoices.aggregate(total=Sum('commission'))['total'] or Decimal('0')
+    
+    rent_invoices = invoices.filter(invoice_type=InvoiceType.RENT)
+    sale_invoices = invoices.filter(invoice_type=InvoiceType.SALE)
+    total_rent_revenue = rent_invoices.aggregate(total=Sum('total_amount'))['total'] or Decimal('0')
+    total_sale_revenue = sale_invoices.aggregate(total=Sum('total_amount'))['total'] or Decimal('0')
+    
+    invoice_items = InvoiceItem.objects.filter(invoice__in=invoices)
+    total_items = invoice_items.count()
+    total_rent_days = invoice_items.aggregate(total=Sum('days'))['total'] or 0
+    
+    sale_items = invoice_items.filter(invoice__invoice_type=InvoiceType.SALE)
+    sale_product_cost = sale_items.aggregate(total=Sum('product__cost_price'))['total'] or Decimal('0')
+    
+    total_gross_profit = total_revenue - sale_product_cost
+    
+    total_penalties = Penalty.objects.filter(
+        invoice__in=invoices
+    ).aggregate(total=Sum('amount'))['total'] or Decimal('0')
+    
+    customer_payments = CustomerPayment.objects.filter(
+        payment_date__date=today
+    )
+    total_payments = customer_payments.aggregate(total=Sum('amount'))['total'] or Decimal('0')
+    
+    context = {
+        'today': today,
+        'invoices': invoices,
+        'employees': employees,
+        'selected_employee': selected_employee,
+        'total_invoices': total_invoices,
+        'total_revenue': total_revenue,
+        'total_paid': total_paid,
+        'total_remaining': total_remaining,
+        'total_discount': total_discount,
+        'total_commission': total_commission,
+        'total_rent_revenue': total_rent_revenue,
+        'total_sale_revenue': total_sale_revenue,
+        'total_items': total_items,
+        'total_rent_days': total_rent_days,
+        'sale_product_cost': sale_product_cost,
+        'total_gross_profit': total_gross_profit,
+        'total_penalties': total_penalties,
+        'total_payments': total_payments,
+    }
+    return render(request, 'employee_performance_print.html', context)
+
+
+@login_required
+def admin_daily_report_print(request):
+    today = timezone.now().date()
+    
+    invoices = Invoice.objects.filter(
+        created_at__date=today
+    ).exclude(status=InvoiceStatus.CANCELLED)
+    
+    rent_invoices = invoices.filter(invoice_type=InvoiceType.RENT)
+    sale_invoices = invoices.filter(invoice_type=InvoiceType.SALE)
+    
+    total_invoices = invoices.count()
+    total_rent_invoices = rent_invoices.count()
+    total_sale_invoices = sale_invoices.count()
+    
+    total_revenue = invoices.aggregate(total=Sum('total_amount'))['total'] or Decimal('0')
+    total_rent_revenue = rent_invoices.aggregate(total=Sum('total_amount'))['total'] or Decimal('0')
+    total_sale_revenue = sale_invoices.aggregate(total=Sum('total_amount'))['total'] or Decimal('0')
+    
+    total_paid = invoices.aggregate(total=Sum('paid_amount'))['total'] or Decimal('0')
+    total_remaining = invoices.aggregate(total=Sum('remaining_amount'))['total'] or Decimal('0')
+    total_discount = invoices.aggregate(total=Sum('discount'))['total'] or Decimal('0')
+    total_commission = invoices.aggregate(total=Sum('commission'))['total'] or Decimal('0')
+    
+    invoice_items = InvoiceItem.objects.filter(invoice__in=invoices)
+    total_items = invoice_items.count()
+    total_rent_days = invoice_items.aggregate(total=Sum('days'))['total'] or 0
+    
+    sale_items = invoice_items.filter(invoice__invoice_type=InvoiceType.SALE)
+    rent_items = invoice_items.filter(invoice__invoice_type=InvoiceType.RENT)
+    
+    sale_product_cost = sale_items.aggregate(total=Sum('product__cost_price'))['total'] or Decimal('0')
+    rent_product_cost = rent_items.aggregate(total=Sum('product__cost_price'))['total'] or Decimal('0')
+    
+    total_old_revenue = ProductOldRevenue.objects.filter(
+        date=today
+    ).aggregate(total=Sum('amount'))['total'] or Decimal('0')
+    
+    total_penalties = Penalty.objects.filter(
+        invoice__in=invoices
+    ).aggregate(total=Sum('amount'))['total'] or Decimal('0')
+    
+    total_gross_revenue = total_revenue + total_old_revenue + total_penalties
+    total_gross_profit = total_gross_revenue - sale_product_cost
+    
+    expenses = Expense.objects.filter(
+        expense_date=today
+    )
+    total_expenses = expenses.aggregate(total=Sum('amount'))['total'] or Decimal('0')
+    
+    total_salaries_paid = MonthlySalaryPayment.objects.filter(
+        payment_date=today
+    ).aggregate(total=Sum('amount'))['total'] or Decimal('0')
+    
+    repairs = RepairAndClean.objects.filter(
+        created_at=today
+    )
+    total_repair_cost = repairs.aggregate(total=Sum('total_cost'))['total'] or Decimal('0')
+    repair_count = repairs.filter(kind='repair').count()
+    clean_count = repairs.filter(kind='clean').count()
+    
+    total_operating_expenses = total_expenses + total_salaries_paid + total_repair_cost
+    total_net_profit = total_gross_revenue - sale_product_cost - total_operating_expenses
+    
+    profit_margin = 0
+    if total_gross_revenue > 0:
+        profit_margin = (total_gross_profit / total_gross_revenue) * 100
+    
+    net_profit_margin = 0
+    if total_gross_revenue > 0:
+        net_profit_margin = (total_net_profit / total_gross_revenue) * 100
+    
+    top_customers = Customer.objects.filter(
+        invoice__in=invoices
+    ).annotate(
+        total_spent=Sum('invoice__total_amount'),
+        total_invoices=Count('invoice')
+    ).order_by('-total_spent')[:10]
+    
+    invoices_with_users = invoices.select_related('created_by', 'customer')
+    
+    context = {
+        'today': today,
+        'invoices': invoices_with_users,
+        'total_invoices': total_invoices,
+        'total_rent_invoices': total_rent_invoices,
+        'total_sale_invoices': total_sale_invoices,
+        'total_revenue': total_revenue,
+        'total_rent_revenue': total_rent_revenue,
+        'total_sale_revenue': total_sale_revenue,
+        'total_paid': total_paid,
+        'total_remaining': total_remaining,
+        'total_discount': total_discount,
+        'total_commission': total_commission,
+        'total_items': total_items,
+        'total_rent_days': total_rent_days,
+        'sale_product_cost': sale_product_cost,
+        'rent_product_cost': rent_product_cost,
+        'total_old_revenue': total_old_revenue,
+        'total_penalties': total_penalties,
+        'total_gross_revenue': total_gross_revenue,
+        'total_gross_profit': total_gross_profit,
+        'profit_margin': profit_margin,
+        'total_expenses': total_expenses,
+        'total_salaries_paid': total_salaries_paid,
+        'total_repair_cost': total_repair_cost,
+        'repair_count': repair_count,
+        'clean_count': clean_count,
+        'total_operating_expenses': total_operating_expenses,
+        'total_net_profit': total_net_profit,
+        'net_profit_margin': net_profit_margin,
+        'top_customers': top_customers,
+    }
+    return render(request, 'admin_daily_report_print.html', context)
+
+@login_required
+def provider_list(request):
+    today = timezone.now().date()
+    start_date = request.GET.get('start_date')
+    end_date = request.GET.get('end_date')
+    filter_type = request.GET.get('filter_type')
+    
+    if filter_type == 'today':
+        start_date = today
+        end_date = today
+    elif start_date:
+        start_date = datetime.strptime(start_date, '%Y-%m-%d').date()
+    else:
+        start_date = None
+    
+    if end_date:
+        end_date = datetime.strptime(end_date, '%Y-%m-%d').date()
+    elif not filter_type == 'today':
+        end_date = None
+    
+    providers = repairandcleanprovider.objects.all().prefetch_related('services', 'payments')
+    
+    if start_date and end_date:
+        provider_ids = []
+        for provider in providers:
+            services = provider.services.filter(created_at__gte=start_date, created_at__lte=end_date)
+            payments = provider.payments.filter(payment_date__gte=start_date, payment_date__lte=end_date)
+            if services.exists() or payments.exists():
+                provider_ids.append(provider.id)
+        providers = providers.filter(id__in=provider_ids)
+    
+    total_providers = providers.count()
+    
+    total_services = 0
+    total_paid = 0
+    total_pending = 0
+    total_remaining = 0
+    
+    for provider in providers:
+        services = provider.services.all()
+        if start_date and end_date:
+            services = services.filter(created_at__gte=start_date, created_at__lte=end_date)
+        payments = provider.payments.all()
+        if start_date and end_date:
+            payments = payments.filter(payment_date__gte=start_date, payment_date__lte=end_date)
+        
+        total_services += services.count()
+        total_paid += sum(p.amount for p in payments.filter(status='paid'))
+        total_pending += sum(p.amount for p in payments.filter(status='pending'))
+        total_remaining += sum(service.get_remaining_amount() for service in services)
+    
+    context = {
+        'providers': providers,
+        'total_providers': total_providers,
+        'total_services': total_services,
+        'total_paid': total_paid,
+        'total_pending': total_pending,
+        'total_remaining': total_remaining,
+        'start_date': start_date,
+        'end_date': end_date,
+        'today': today,
+    }
+    return render(request, 'providers/provider_list.html', context)
+
+
+@login_required
+def provider_detail(request, pk):
+    today = timezone.now().date()
+    start_date = request.GET.get('start_date')
+    end_date = request.GET.get('end_date')
+    filter_type = request.GET.get('filter_type')
+    
+    if filter_type == 'today':
+        start_date = today
+        end_date = today
+    elif start_date:
+        start_date = datetime.strptime(start_date, '%Y-%m-%d').date()
+    else:
+        start_date = None
+    
+    if end_date:
+        end_date = datetime.strptime(end_date, '%Y-%m-%d').date()
+    elif not filter_type == 'today':
+        end_date = None
+    
+    provider = get_object_or_404(repairandcleanprovider, pk=pk)
+    services = provider.services.all()
+    payments = provider.payments.all()
+    
+    if start_date and end_date:
+        services = services.filter(created_at__gte=start_date, created_at__lte=end_date)
+        payments = payments.filter(payment_date__gte=start_date, payment_date__lte=end_date)
+    
+    total_services_cost = sum(service.total_cost for service in services)
+    total_paid = sum(payment.amount for payment in payments.filter(status='paid'))
+    total_pending = sum(payment.amount for payment in payments.filter(status='pending'))
+    balance = total_services_cost - total_paid
+    total_unpaid = sum(service.get_remaining_amount() for service in services)
+    
+    context = {
+        'provider': provider,
+        'services': services,
+        'payments': payments,
+        'total_services_cost': total_services_cost,
+        'total_paid': total_paid,
+        'total_pending': total_pending,
+        'balance': balance,
+        'total_unpaid': total_unpaid,
+        'start_date': start_date,
+        'end_date': end_date,
+        'today': today,
+    }
+    return render(request, 'providers/provider_detail.html', context)
+
+
+@login_required
+def provider_create(request):
+    if request.method == 'POST':
+        form = ProviderForm(request.POST)
+        if form.is_valid():
+            form.save()
+            messages.success(request, 'تم إضافة مزود الخدمة بنجاح')
+            return redirect('provider_list')
+    else:
+        form = ProviderForm()
+    
+    context = {
+        'form': form,
+        'title': 'إضافة مزود خدمة جديد',
+    }
+    return render(request, 'providers/provider_form.html', context)
+
+
+@login_required
+def provider_edit(request, pk):
+    provider = get_object_or_404(repairandcleanprovider, pk=pk)
+    
+    if request.method == 'POST':
+        form = ProviderForm(request.POST, instance=provider)
+        if form.is_valid():
+            form.save()
+            messages.success(request, 'تم تحديث بيانات مزود الخدمة بنجاح')
+            return redirect('provider_list')
+    else:
+        form = ProviderForm(instance=provider)
+    
+    context = {
+        'form': form,
+        'title': 'تعديل بيانات مزود الخدمة',
+        'provider': provider,
+    }
+    return render(request, 'providers/provider_form.html', context)
+
+
+
+
+@login_required
+def provider_delete(request, pk):
+    provider = get_object_or_404(repairandcleanprovider, pk=pk)
+    
+    if request.method == 'POST':
+        provider.delete()
+        messages.success(request, 'تم حذف مزود الخدمة بنجاح')
+        return redirect('provider_list')
+    
+    context = {
+        'provider': provider,
+    }
+    return render(request, 'providers/provider_confirm_delete.html', context)
+
+
+
+@login_required
+def provider_payment_create(request, provider_pk):
+    provider = get_object_or_404(repairandcleanprovider, pk=provider_pk)
+    
+    if request.method == 'POST':
+        form = ProviderPaymentForm(request.POST)
+        if form.is_valid():
+            payment = form.save(commit=False)
+            payment.provider = provider
+            
+            if payment.service:
+                if payment.amount > payment.service.get_remaining_amount():
+                    messages.error(request, f'المبلغ المدفوع ({payment.amount}) يتجاوز المبلغ المتبقي للخدمة ({payment.service.get_remaining_amount()})')
+                    return render(request, 'providers/payment_form.html', {
+                        'form': form,
+                        'provider': provider,
+                        'title': 'تسجيل دفعة جديدة',
+                    })
+                
+                payment.service.paid_amount += payment.amount
+                payment.service.update_payment_status()
+                payment.service.save()
+            
+            payment.save()
+            messages.success(request, 'تم تسجيل الدفعة بنجاح')
+            return redirect('provider_detail', pk=provider.pk)
+    else:
+        form = ProviderPaymentForm()
+        form.fields['service'].queryset = RepairAndClean.objects.filter(
+            status='finished',
+            provider=provider
+        )
+        form.fields['service'].label_from_instance = lambda obj: f"{obj.product.name} - {obj.get_kind_display()} - المتبقي: {obj.get_remaining_amount()} د.ل"
+    
+    context = {
+        'form': form,
+        'provider': provider,
+        'title': 'تسجيل دفعة جديدة',
+    }
+    return render(request, 'providers/payment_form.html', context)
+
+
+@login_required
+def provider_payment_list(request):
+    payments = ProviderPayment.objects.all().select_related('provider', 'service')
+    
+    provider_id = request.GET.get('provider')
+    status = request.GET.get('status')
+    date_from = request.GET.get('date_from')
+    date_to = request.GET.get('date_to')
+    
+    if provider_id:
+        payments = payments.filter(provider_id=provider_id)
+    if status:
+        payments = payments.filter(status=status)
+    if date_from:
+        payments = payments.filter(payment_date__gte=date_from)
+    if date_to:
+        payments = payments.filter(payment_date__lte=date_to)
+    
+    total_amount = payments.aggregate(Sum('amount'))['amount__sum'] or 0
+    total_paid = payments.filter(status='paid').aggregate(Sum('amount'))['amount__sum'] or 0
+    total_pending = payments.filter(status='pending').aggregate(Sum('amount'))['amount__sum'] or 0
+    
+    providers = repairandcleanprovider.objects.all()
+    
+    context = {
+        'payments': payments,
+        'providers': providers,
+        'total_amount': total_amount,
+        'total_paid': total_paid,
+        'total_pending': total_pending,
+    }
+    return render(request, 'providers/payment_list.html', context)
+
+
+@login_required
+def provider_payment_delete(request, pk):
+    payment = get_object_or_404(ProviderPayment, pk=pk)
+    provider_pk = payment.provider.pk
+    
+    if request.method == 'POST':
+        if payment.service and payment.status == 'paid':
+            payment.service.paid_amount -= payment.amount
+            payment.service.update_payment_status()
+            payment.service.save()
+        
+        payment.delete()
+        messages.success(request, 'تم حذف الدفعة بنجاح')
+        return redirect('provider_detail', pk=provider_pk)
+    
+    context = {
+        'payment': payment,
+    }
+    return render(request, 'providers/payment_confirm_delete.html', context)
+
+
+
+@login_required
+def product_old_revenue_list(request):
+    revenues = ProductOldRevenue.objects.select_related('product').all()
+    
+    product_id = request.GET.get('product', '')
+    date_from = request.GET.get('date_from', '')
+    date_to = request.GET.get('date_to', '')
+    
+    if product_id:
+        revenues = revenues.filter(product_id=product_id)
+    if date_from:
+        revenues = revenues.filter(date__gte=date_from)
+    if date_to:
+        revenues = revenues.filter(date__lte=date_to)
+    
+    total_amount = revenues.aggregate(Sum('amount'))['amount__sum'] or 0
+    
+    paginator = Paginator(revenues, 20)
+    page_number = request.GET.get('page')
+    page_obj = paginator.get_page(page_number)
+    
+    context = {
+        'revenues': page_obj,
+        'products': Product.objects.all().order_by('name'),
+        'selected_product': product_id,
+        'date_from': date_from,
+        'date_to': date_to,
+        'total_amount': total_amount,
+        'title': 'الإيرادات القديمة للفساتين',
+    }
+    return render(request, 'product_old_revenue_list.html', context)
+
+@login_required
+def product_old_revenue_add(request):
+    if request.method == 'POST':
+        form = ProductOldRevenueForm(request.POST)
+        if form.is_valid():
+            form.save()
+            messages.success(request, 'تم إضافة الإيراد القديم بنجاح')
+            return redirect('product_old_revenue_list')
+    else:
+        form = ProductOldRevenueForm()
+    
+    context = {
+        'form': form,
+        'title': 'إضافة إيراد قديم',
+        'is_edit': False,
+    }
+    return render(request, 'product_old_revenue_form.html', context)
+
+@login_required
+def product_old_revenue_edit(request, pk):
+    revenue = get_object_or_404(ProductOldRevenue, pk=pk)
+    
+    if request.method == 'POST':
+        form = ProductOldRevenueForm(request.POST, instance=revenue)
+        if form.is_valid():
+            form.save()
+            messages.success(request, 'تم تحديث الإيراد القديم بنجاح')
+            return redirect('product_old_revenue_list')
+    else:
+        form = ProductOldRevenueForm(instance=revenue)
+    
+    context = {
+        'form': form,
+        'revenue': revenue,
+        'title': 'تعديل الإيراد القديم',
+        'is_edit': True,
+    }
+    return render(request, 'product_old_revenue_form.html', context)
+
+@login_required
+def product_old_revenue_delete(request, pk):
+    revenue = get_object_or_404(ProductOldRevenue, pk=pk)
+    
+    if request.method == 'POST':
+        revenue.delete()
+        messages.success(request, 'تم حذف الإيراد القديم بنجاح')
+        return redirect('product_old_revenue_list')
+    
+    context = {
+        'revenue': revenue,
+        'title': 'حذف الإيراد القديم',
+    }
+    return render(request, 'product_old_revenue_confirm_delete.html', context)
+
+@login_required
+def product_old_revenue_detail(request, pk):
+    revenue = get_object_or_404(ProductOldRevenue, pk=pk)
+    
+    context = {
+        'revenue': revenue,
+        'title': 'تفاصيل الإيراد القديم',
+    }
+    return render(request, 'product_old_revenue_detail.html', context)
+
+@login_required
+def product_old_revenue_print(request):
+    revenues = ProductOldRevenue.objects.select_related('product').all()
+    
+    product_id = request.GET.get('product', '')
+    date_from = request.GET.get('date_from', '')
+    date_to = request.GET.get('date_to', '')
+    
+    if product_id:
+        revenues = revenues.filter(product_id=product_id)
+    if date_from:
+        revenues = revenues.filter(date__gte=date_from)
+    if date_to:
+        revenues = revenues.filter(date__lte=date_to)
+    
+    grouped_data = {}
+    for revenue in revenues:
+        key = revenue.product_id
+        if key not in grouped_data:
+            grouped_data[key] = {
+                'product': revenue.product,
+                'total_amount': 0,
+                'count': 0,
+                'dates': []
+            }
+        grouped_data[key]['total_amount'] += revenue.amount
+        grouped_data[key]['count'] += 1
+        grouped_data[key]['dates'].append(revenue.date)
+    
+    grouped_list = list(grouped_data.values())
+    total_sum = sum(item['total_amount'] for item in grouped_list)
+    
+    context = {
+        'grouped_data': grouped_list,
+        'total_sum': total_sum,
+        'date_from': date_from,
+        'date_to': date_to,
+        'product_id': product_id,
+    }
+    return render(request, 'product_old_revenue_print.html', context)
+
+from django.db import transaction
+
+@login_required
+def edit_invoice(request, pk):
+    
+    invoice = get_object_or_404(Invoice, pk=pk)
+
+    if invoice.status == InvoiceStatus.CANCELLED:
+        messages.error(request, 'لا يمكن تعديل فاتورة ملغاة')
+        return redirect('invoice_detail', pk=invoice.pk)
+
+    if request.method == 'GET':
+        customers = Customer.objects.filter(is_active=True)
+        payment_methods = PaymentMethod.objects.filter(is_active=True)
+
+        invoice_items = invoice.items.select_related('product').all()
+
+        context = {
+            'invoice': invoice,
+            'invoice_items': invoice_items,
+            'customers': customers,
+            'payment_methods': payment_methods,
+            'invoice_types': InvoiceType.choices,
+        }
+        return render(request, 'invoices/edit_invoice.html', context)
+
+    elif request.method == 'POST':
+        try:
+            with transaction.atomic():
+                old_customer = invoice.customer
+                old_remaining = invoice.remaining_amount or Decimal('0')
+                old_total = invoice.total_amount or Decimal('0')
+
+                invoice_type = invoice.invoice_type       
+
+                rent_start_date = invoice.rent_start_date
+                rent_end_date = invoice.rent_end_date
+
+                if invoice_type == InvoiceType.RENT:
+                    start_str = request.POST.get('rent_start_date')
+                    end_str = request.POST.get('rent_end_date')
+
+                    if not start_str or not end_str:
+                        messages.error(request, 'يرجى تحديد تاريخ بداية ونهاية الإيجار')
+                        return redirect('edit_invoice', pk=invoice.pk)
+
+                    try:
+                        rent_start_date = datetime.strptime(start_str, '%Y-%m-%d').date()
+                        rent_end_date = datetime.strptime(end_str, '%Y-%m-%d').date()
+                    except ValueError:
+                        messages.error(request, 'صيغة التاريخ غير صحيحة')
+                        return redirect('edit_invoice', pk=invoice.pk)
+
+                    if rent_start_date > rent_end_date:
+                        messages.error(request, 'تاريخ البداية يجب أن يكون قبل تاريخ النهاية')
+                        return redirect('edit_invoice', pk=invoice.pk)
+
+                    for item in invoice.items.select_related('product').all():
+                        is_available, msg = Invoice.check_product_availability(
+                            item.product,
+                            rent_start_date,
+                            rent_end_date,
+                            exclude_invoice=invoice
+                        )
+                        if not is_available:
+                            messages.error(
+                                request,
+                                f'المنتج {item.product.name}: {msg}'
+                            )
+                            return redirect('edit_invoice', pk=invoice.pk)
+
+                is_cash_customer = request.POST.get('is_cash_customer', '0') == '1'
+                new_customer = None
+
+                if is_cash_customer:
+                    new_customer = None
+                else:
+                    customer_id = request.POST.get('customer_id')
+                    if not customer_id:
+                        messages.error(request, 'يرجى اختيار عميل أو تحديد عميل نقدي')
+                        return redirect('edit_invoice', pk=invoice.pk)
+                    try:
+                        new_customer = Customer.objects.get(id=int(customer_id))
+                    except Customer.DoesNotExist:
+                        messages.error(request, 'العميل غير موجود')
+                        return redirect('edit_invoice', pk=invoice.pk)
+
+                try:
+                    discount = Decimal(str(request.POST.get('discount', '0') or '0'))
+                    paid_amount = Decimal(str(request.POST.get('paid_amount', '0') or '0'))
+                    commission = Decimal(str(request.POST.get('commission', '0') or '0'))
+                    extra_charges = Decimal(str(request.POST.get('extra_amount', '0') or '0'))
+                except Exception:
+                    messages.error(request, 'قيم المبالغ غير صحيحة')
+                    return redirect('edit_invoice', pk=invoice.pk)
+
+                if discount < 0 or paid_amount < 0:
+                    messages.error(request, 'لا يمكن أن تكون القيم سالبة')
+                    return redirect('edit_invoice', pk=invoice.pk)
+
+                payment_method_id = request.POST.get('payment_method')
+                new_payment_method = None
+                if payment_method_id:
+                    try:
+                        new_payment_method = PaymentMethod.objects.get(id=int(payment_method_id))
+                    except PaymentMethod.DoesNotExist:
+                        new_payment_method = None
+
+                notes = request.POST.get('notes', '')
+                identity_verified = request.POST.get(
+                    'identity_verified', 'true'
+                ) in ['true', 'True', '1', 'on']
+
+                subtotal = sum(
+                    (item.days or 1) * item.unit_price
+                    for item in invoice.items.all()
+                )
+
+                new_total = subtotal - discount + commission + extra_charges
+
+                if old_customer and old_remaining > 0:
+                    old_customer.debt_balance -= old_remaining
+                    if old_customer.debt_balance < 0:
+                        old_customer.debt_balance = Decimal('0')
+                    old_customer.save()
+
+                invoice.customer = new_customer
+                invoice.rent_start_date = rent_start_date
+                invoice.rent_end_date = rent_end_date
+                invoice.discount = discount
+                invoice.commission = commission
+                invoice.paid_amount = paid_amount
+                invoice.payment_method = new_payment_method
+                invoice.notes = notes
+                invoice.identity_verified = identity_verified
+                invoice.total_amount = new_total
+                invoice.remaining_amount = new_total - paid_amount
+                invoice.extra_amount = extra_charges
+
+                invoice.save()
+
+                if invoice.customer and invoice.remaining_amount > 0:
+                    invoice.customer.debt_balance += invoice.remaining_amount
+                    invoice.customer.save()
+
+                messages.success(request, 'تم تعديل الفاتورة بنجاح')
+                return redirect('print_receipt', invoice.pk)
+
+        except Exception as e:
+            messages.error(request, f'حدث خطأ: {str(e)}')
+            return redirect('edit_invoice', pk=invoice.pk)
+
+    messages.error(request, 'حدث خطأ غير معروف!')
+    return redirect('invoice_list')
+
+
+
+@login_required
+@require_POST
+def delete_customer_payment(request, pk):
+    with transaction.atomic():
+        payment = get_object_or_404(
+            CustomerPayment.objects.select_for_update(),
+            pk=pk
+        )
+
+        if payment.invoice_id:
+            invoice = payment.invoice.__class__.objects.select_for_update().get(
+                pk=payment.invoice_id
+            )
+
+            invoice.paid_amount = max(
+                Decimal('0.00'),
+                (invoice.paid_amount or Decimal('0.00')) - payment.amount
+            )
+
+            invoice.remaining_amount = max(
+                Decimal('0.00'),
+                invoice.total_amount - invoice.paid_amount
+            )
+            customer = invoice.customer
+            if customer:
+                customer.debt_balance = max(
+                    Decimal('0.00'),
+                    (customer.debt_balance or Decimal('0.00')) + payment.amount
+                )
+                customer.save(update_fields=['debt_balance'])
+            invoice.save(update_fields=[
+                'paid_amount',
+                'remaining_amount',
+            ])
+
+        payment.delete()
+
+    messages.success(request, 'تم حذف الدفعة وتحديث المبلغ المدفوع في الفاتورة.')
+    return redirect('all_customer_payments')
+
+
+
+
+@login_required
+def penalty_create(request, pk):
+    customer = get_object_or_404(Customer, pk=pk)
+
+    if request.method == 'POST':
+        invoice_id = request.POST.get('invoice_id')
+        amount_raw = request.POST.get('amount', '').strip()
+        reason = request.POST.get('reason', '').strip()
+
+        try:
+            amount = Decimal(amount_raw)
+            if not amount.is_finite() or amount <= 0:
+                raise ValueError
+        except (InvalidOperation, ValueError):
+            messages.error(request, 'أدخل مبلغ غرامة صحيحًا.')
+            return redirect('penalty_create', pk=customer.pk)
+
+        if not reason:
+            messages.error(request, 'يرجى إدخال سبب الغرامة.')
+            return redirect('penalty_create', pk=customer.pk)
+        
+        payment_date = timezone.localdate()
+
+        if request.user.is_main_admin:
+            date_raw = request.POST.get('payment_date', '').strip()
+
+            if date_raw:
+                try:
+                    payment_date = datetime.strptime(
+                        date_raw, '%Y-%m-%d'
+                    ).date()
+                except ValueError:
+                    messages.error(request, 'تاريخ الدفع غير صحيح.')
+                    return redirect('penalty_create', pk=customer.pk)
+
+        with transaction.atomic():
+            invoice = get_object_or_404(
+                Invoice.objects.select_for_update(),
+                pk=invoice_id,
+                customer=customer,
+            )
+
+           
+            penalty = Penalty.objects.create(
+                invoice=invoice,
+                amount=amount,
+                reason=reason,
+                created_at=payment_date
+            )
+
+            payment = CustomerPayment.objects.create(
+                customer=customer,
+                invoice=invoice,
+                amount=amount,
+                notes=f'غرامة: {reason}',
+                created_by=request.user,
+                payment_date=payment_date
+            )
+
+            penalty.payment = payment
+            penalty.save(update_fields=['payment'])
+
+            
+            invoice.paid_amount += amount
+            invoice.total_amount += amount
+           
+
+            invoice.save(update_fields=[
+                'paid_amount',
+                'remaining_amount',
+                'status',
+            ])
+
+            
+        messages.success(request, 'تمت إضافة الغرامة وتسجيلها كدفعة بنجاح.')
+        return redirect('customers_detail', pk=customer.pk)
+
+    invoices = Invoice.objects.filter(
+        customer=customer,
+    ).order_by('created_at', 'pk')
+
+    return render(request, 'customers/penalty_create.html', {
+        'customer': customer,
+        'invoices': invoices,
+        'today': timezone.localdate(),
+    })
+
+
+@login_required
+def penalty_delete(request, pk):
+    if request.method != 'POST':
+        return redirect('customers_list')
+
+    with transaction.atomic():
+        penalty = get_object_or_404(
+            Penalty.objects.select_for_update(of=('self',)).select_related(
+              'invoice', 'invoice__customer', 'payment'
+             ),
+           pk=pk
+               )
+
+        invoice = Invoice.objects.select_for_update().get(
+            pk=penalty.invoice.pk
+        )
+        customer = None
+
+        if invoice.customer:
+            customer = Customer.objects.select_for_update().get(
+                pk=invoice.customer.pk
+            )
+
+        amount = penalty.amount
+        payment = penalty.payment
+
+        if payment is None:
+            candidates = CustomerPayment.objects.filter(
+                invoice=invoice,
+                amount__gte=amount,
+            ).order_by('-created_at', '-pk')
+
+            payment = candidates.filter(
+                created_at__date=penalty.created_at.date()
+            ).first()
+
+            if payment is None:
+                payment = candidates.first()
+
+        if payment is None or payment.amount < amount:
+            messages.error(
+                request,
+                'تعذر حذف الغرامة: لم يتم العثور على دفعة مناسبة لخصم مبلغها.'
+            )
+            return redirect('customers_detail', pk=customer.pk) if customer else redirect('customers_list')
+
+        payment = CustomerPayment.objects.select_for_update().get(
+            pk=payment.pk
+        )
+
+      
+
+        penalty.delete()
+
+    messages.success(request, 'تم حذف الغرامة وخصم مبلغها من الدفعة.')
+    return redirect('customers_detail', pk=customer.pk) if customer else redirect('customers_list')
+
+
+def print_invoices_by_start_date(request):
+    start_date = request.GET.get('start_date')
+    date_obj = parse_date(start_date) if start_date else None
+    
+    if date_obj:
+        invoices = Invoice.objects.filter(rent_start_date=date_obj).select_related(
+            'customer'
+        ).prefetch_related(
+            'items__product'
+        ).order_by('id')
+    else:
+        invoices = Invoice.objects.none()
+
+    context = {
+        'invoices': invoices,
+        'start_date': date_obj or start_date,
+    }
+    
+    return render(request, 'invoices_by_start_date_print.html', context)
