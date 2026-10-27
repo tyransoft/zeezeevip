@@ -1563,11 +1563,13 @@ document.getElementById('form_payment_method').value = document.getElementById('
 document.getElementById('form_notes').value = document.getElementById('modal-notes').value || '';
 document.getElementById('form_sale_price').value = document.getElementById('sale_price_display').value || '0';
 var createdDate = document.getElementById('modal-created-date').value;
-
 if (!createdDate) {
     showToast('الرجاء تحديد تاريخ الإضافة', 'error');
     return;
 }
+
+document.getElementById('form_created_date').value = createdDate;
+
 var container = document.getElementById('form-products-container');
 container.innerHTML = '';
 Object.values(cart).forEach(function(p) {
