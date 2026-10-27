@@ -1547,7 +1547,7 @@ def create_invoice(request):
                              customer=invoice.customer,
                              amount=invoice.paid_amount,
                              created_by=request.user,
-                             payment_date=timezone.now(),
+                             payment_date=invoice.created_at,
                               notes=note
                                  
                             )   
