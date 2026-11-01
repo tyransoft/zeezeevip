@@ -94,6 +94,7 @@ urlpatterns = [
     path('hr/monthly/<int:employee_id>/statement/', monthly_salary_statement, name='monthly_salary_statement'),
 
     path('providers/', provider_list, name='provider_list'),
+    path( 'provider/<int:provider_id>/print-services/',  print_provider_services, name='print_provider_services'),
     path('providers/create/', provider_create, name='provider_create'),
     path('providers/<int:pk>/edit/', provider_edit, name='provider_edit'),
     path('providers/<int:pk>/', provider_detail, name='provider_detail'),
