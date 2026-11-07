@@ -46,10 +46,12 @@ class CustomUser(AbstractUser):
     def is_accountant(self):
         return self.role == Role.ACCOUNTANT
 
-    def can_see_all_data(self):
-        return self.role in [Role.SUPER_ADMIN,  Role.ACCOUNTANT]
     def is_product_manager(self):
         return self.role == Role.PRODUCT_MANAGER
+
+    def can_see_all_data(self):
+        return self.role in [Role.SUPER_ADMIN,  Role.ACCOUNTANT]
+
 
     def is_employee(self):
         return self.role == Role.EMPLOYEE
@@ -137,7 +139,7 @@ class Product(models.Model):
         verbose_name_plural = 'الفساتين'
         ordering = ['name']
     def generate_qr(self):
-      base_url = getattr(settings, "SITE_URL", "https://zeezeevip.tip2.libyanspider.cloud/")
+      base_url = getattr(settings, "SITE_URL", "https://dressrent.tip2.libyanspider.cloud/")
     
       product_url = f"{base_url}/products/qr/{self.barcode}/"
 
@@ -190,10 +192,19 @@ class Product(models.Model):
         return self.status == Dstatus.INREPAIR
 
     def is_sold(self):
-        return self.status == Dstatus.SOLD    
+        return self.status == Dstatus.SOLD 
+    
+    from django.utils.functional import cached_property
 
-
-
+    @cached_property
+    def is_cost_covered(self):
+      from django.db.models import Sum
+      revenue = self.invoiceitem_set.filter(
+            invoice__invoice_type=InvoiceType.RENT,
+      ).exclude(
+            invoice__status=InvoiceStatus.CANCELLED,
+      ).aggregate(total=Sum('total_price'))['total'] or Decimal('0.00')
+      return revenue >= (self.cost_price or Decimal('0.00'))
 
 
 class PaymentMethod(models.Model):
@@ -206,6 +217,7 @@ class PaymentMethod(models.Model):
         verbose_name='نسبة الزيادة %',
         help_text='النسبة المئوية التي تضاف على إجمالي الفاتورة'
     )
+
     is_active = models.BooleanField(default=True, verbose_name='نشط')
     is_default = models.BooleanField(default=False, verbose_name='الطريقة الافتراضية')
     created_at = models.DateTimeField(auto_now_add=True)
@@ -474,7 +486,14 @@ class Customer(models.Model):
 class CustomerPayment(models.Model):
     customer = models.ForeignKey(Customer, on_delete=models.CASCADE, related_name='payments',  null=True, blank=True)
     amount = models.DecimalField(max_digits=12, decimal_places=2, verbose_name='المبلغ المسدد')
-    payment_date = models.DateTimeField( verbose_name='تاريخ التسديد')
+    payment_date = models.DateField( verbose_name='تاريخ التسديد')
+    payment_method = models.ForeignKey(
+        'PaymentMethod',
+        on_delete=models.SET_NULL,
+        null=True, blank=True,
+        related_name='customer_payments',
+        verbose_name='طريقة الدفع'
+    )
     notes = models.TextField(blank=True, verbose_name='ملاحظات')
     receipt_number = models.CharField(max_length=50, unique=True, blank=True, verbose_name='رقم الإيصال')
     created_by = models.ForeignKey('core.CustomUser', on_delete=models.SET_NULL, null=True, verbose_name='تم بواسطة')
@@ -620,7 +639,6 @@ class Invoice(models.Model):
                         return invoice_number
 
                 new_number += 1
-
     @staticmethod
     def check_product_availability(product, start_date, end_date, exclude_invoice=None):
 
@@ -908,6 +926,7 @@ class MonthlySalaryPayment(models.Model):
     
     def __str__(self):
         return f"{self.employee.full_name} - {self.amount} - {self.receipt_number}"
+    
 
     def save(self, *args, **kwargs):
       from core.models import ExpenseCategory, Expense
@@ -984,7 +1003,9 @@ class ProductOldRevenue(models.Model):
 
     def __str__(self):
         return f"{self.product.name} - {self.amount} - {self.date}"
-    
+
+
+
 
 class EmployeeBonus(models.Model):
     employee = models.ForeignKey(
@@ -1018,6 +1039,4 @@ class EmployeeBonus(models.Model):
         ordering = ['-bonus_date']
 
     def __str__(self):
-        return f"{self.employee.full_name} - {self.amount}"    
-    
-
+        return f"{self.employee.full_name} - {self.amount}"            
