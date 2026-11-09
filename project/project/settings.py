@@ -25,7 +25,7 @@ TEMP=BASE_DIR / 'templates'
 SECRET_KEY = 'django-insecure-v+m14j!w&-(%t5_qji23aftx-wa&@)0wz%y8999&5n(io_i487'
 
 # SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = True
+DEBUG = False
 
 
 
@@ -151,7 +151,8 @@ AUTH_USER_MODEL = 'core.CustomUser'
 CSRF_COOKIE_SECURE = True
 SESSION_COOKIE_SECURE = True
 
-
+CSRF_COOKIE_SAMESITE = 'Lax'
+SESSION_COOKIE_SAMESITE = 'Lax'
 
 AUTH_PASSWORD_VALIDATORS = []
 
