@@ -1496,6 +1496,7 @@ def create_invoice(request):
 
                  already_exists = Invoice.objects.filter(
                   customer=invoice.customer,
+                  rent_start_date=rent_start_date,
                   created_at__date=today,
                    items__product_id=product_id,
                    ).exclude(
