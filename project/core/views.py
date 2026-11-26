@@ -1488,7 +1488,7 @@ def create_invoice(request):
                 except Customer.DoesNotExist:
                     messages.error(request, 'العميل غير موجود')
                     return redirect('invoice_list')
-            if invoice.customer:
+            if invoice.customer and invoice_type == InvoiceType.RENT:
               today = timezone.localdate()
 
               for item in cart:
